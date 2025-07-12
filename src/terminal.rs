@@ -1,3 +1,6 @@
+// tombola/src/terminal.rs
+// This module handles terminal input/output for the Tombola game.
+
 use crossterm::{
     event::{self, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode},

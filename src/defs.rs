@@ -1,3 +1,5 @@
+// src/defs.rs
+// This module defines the basic structures and constants used in the Tombola game.
 pub struct BoardStruct {
     pub cols_per_card: u8,
     pub rows_per_card: u8,
