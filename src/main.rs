@@ -34,13 +34,13 @@ fn show_on(iodevice: IOList, board: &Board, pouch: &[Number], scorecard: &mut Nu
 #[tokio::main]
 async fn main() {
     let mut pouch: Vec<Number> = (FIRSTNUMBER..=LASTNUMBER).collect();
-    let mut scorecard = 0;
 
-    // Create a shared reference to the board (single source of truth)
+    // Create shared references to the board and scorecard (single source of truth)
     let board_ref = Arc::new(Mutex::new(Board::new()));
+    let scorecard_ref = Arc::new(Mutex::new(0));
     
-    // Start the API server in the background with the board reference
-    let (server_handle, shutdown_signal) = server::start_server(Arc::clone(&board_ref));
+    // Start the API server in the background with the board and scorecard references
+    let (server_handle, shutdown_signal) = server::start_server(Arc::clone(&board_ref), Arc::clone(&scorecard_ref));
 
     while ! pouch.is_empty() {
         // Expect event for next extraction
@@ -51,17 +51,19 @@ async fn main() {
         let random_index = rand::random_range(0..pouch.len());
         let extracted: Number = pouch.remove(random_index);
         
-        // Lock the shared board once and perform all operations
+        // Lock the shared board and scorecard once and perform all operations
         if let Ok(mut board) = board_ref.lock() {
-            // Add the extracted number to the shared board and check for prizes
-            board.push(extracted, &mut scorecard);
-            
-            // Show the current state on configured IO device
-            show_on(IO, &board, &pouch, &mut scorecard);
+            if let Ok(mut scorecard) = scorecard_ref.lock() {
+                // Add the extracted number to the shared board and check for prizes
+                board.push(extracted, &mut scorecard);
+                
+                // Show the current state on configured IO device
+                show_on(IO, &board, &pouch, &mut scorecard);
+                
+                // If the scorecard reaches the number of numbers per card, break the loop
+                if *scorecard == NUMBERSPERCARD { break }
+            }
         }
-
-        // If the scorecard reaches the number of numbers per card, break the loop
-        if scorecard == NUMBERSPERCARD { break }
     }
     
     // Signal the server to shutdown
