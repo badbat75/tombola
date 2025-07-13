@@ -1,16 +1,18 @@
 // src/defs.rs
 // This module defines the basic structures and constants used in the Tombola game.
-use serde::{Deserialize, Serialize};
+
+// Type alias for numbers used in the Tombola game
+pub type Number = u8;
 
 pub struct BoardStruct {
-    pub cols_per_card: u8,
-    pub rows_per_card: u8,
-    pub cards_per_row: u8,
-    pub cards_per_col: u8,
-    pub hnumbers_space: u8,
-    pub vnumbers_space: u8,
-    pub hcards_space: u8,
-    pub vcards_space: u8,
+    pub cols_per_card: Number,
+    pub rows_per_card: Number,
+    pub cards_per_row: Number,
+    pub cards_per_col: Number,
+    pub hnumbers_space: Number,
+    pub vnumbers_space: Number,
+    pub hcards_space: Number,
+    pub vcards_space: Number,
 }
 
 pub const BOARDCONFIG: BoardStruct = BoardStruct {
@@ -24,12 +26,36 @@ pub const BOARDCONFIG: BoardStruct = BoardStruct {
     vcards_space: 1, // space between cards in the same column
 };
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct NumberEntry {
-    pub number: u8,
-    pub is_marked: bool,
-}
+pub const FIRSTNUMBER: Number = 1;
+pub const LASTNUMBER: Number = BOARDCONFIG.cols_per_card * BOARDCONFIG.rows_per_card * BOARDCONFIG.cards_per_row * BOARDCONFIG.cards_per_col - 1 + FIRSTNUMBER;
+pub const NUMBERSPERCARD: Number = BOARDCONFIG.cols_per_card * BOARDCONFIG.rows_per_card;
 
-pub const FIRSTNUMBER: u8 = 1;
-pub const LASTNUMBER: u8 = BOARDCONFIG.cols_per_card * BOARDCONFIG.rows_per_card * BOARDCONFIG.cards_per_row * BOARDCONFIG.cards_per_col - 1 + FIRSTNUMBER;
-pub const NUMBERSPERCARD: u8 = BOARDCONFIG.cols_per_card * BOARDCONFIG.rows_per_card;
+// Color definitions for terminal output (ESC sequences)
+pub struct Colors;
+
+#[allow(dead_code)]
+impl Colors {
+    pub fn green() -> &'static str {
+        "\x1b[1;32m" // Bold Green - for current/last number
+    }
+    
+    pub fn yellow() -> &'static str {
+        "\x1b[1;33m" // Bold Yellow - for marked numbers and prizes
+    }
+    
+    pub fn reset() -> &'static str {
+        "\x1b[0m" // Reset - to reset formatting
+    }
+    
+    pub fn red() -> &'static str {
+        "\x1b[1;31m" // Bold Red - for errors or warnings
+    }
+    
+    pub fn blue() -> &'static str {
+        "\x1b[1;34m" // Bold Blue - for information
+    }
+    
+    pub fn magenta() -> &'static str {
+        "\x1b[1;35m" // Bold Magenta - for special highlights
+    }
+}

@@ -1,4 +1,4 @@
-// tombola/src/terminal.rs
+// src/terminal.rs
 // This module handles terminal input/output for the Tombola game.
 
 use crossterm::{
@@ -6,7 +6,8 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode},
 };
 
-use crate::defs::{NumberEntry, BOARDCONFIG, NUMBERSPERCARD};
+use crate::defs::{BOARDCONFIG, NUMBERSPERCARD, Number, Colors};
+use crate::board::Board;
 
 pub struct DeltaPos {
     pub delta_x: u8,
@@ -14,7 +15,7 @@ pub struct DeltaPos {
 }
 
 // Function to calculate the horizontal and vertical shifts
-pub fn downrightshift(prev_num: u8, curr_num: u8) -> DeltaPos {
+pub fn downrightshift(prev_num: Number, curr_num: Number) -> DeltaPos {
     let prev_num = prev_num as i8;
     let curr_num = curr_num as i8;
     let numbers_per_row = (BOARDCONFIG.cols_per_card * BOARDCONFIG.cards_per_row) as i8;
@@ -50,56 +51,40 @@ pub fn downrightshift(prev_num: u8, curr_num: u8) -> DeltaPos {
     }
 }
 
-pub fn print_board(board: &[NumberEntry], extracted: u8) {
-    let mut sorted_board = board.to_vec();
-    sorted_board.sort_by_key(|entry| entry.number);
+pub fn print_board(board: &Board, extracted: Number) {
+    let sorted_entries = board.get_sorted_entries();
     let mut prev_num = 0;
-    for entry in sorted_board.iter() {
-        let curr_num = entry.number;
-        for _ in 0..downrightshift(prev_num, curr_num).delta_y {
+    for (curr_num, is_marked) in &sorted_entries {
+        for _ in 0..downrightshift(prev_num, *curr_num).delta_y {
             println!();
         }
-        let spaces = " ".repeat(downrightshift(prev_num, curr_num).delta_x as usize);
+        let spaces = " ".repeat(downrightshift(prev_num, *curr_num).delta_x as usize);
 
         print!("{spaces}");
-        if curr_num == extracted {
-            print!("\x1b[1;32m{curr_num:2}\x1b[0m"); // Bold green for the last number
-        } else if entry.is_marked {
-            print!("\x1b[1;33m{curr_num:2}\x1b[0m"); // Bold yellow for marked numbers
+        if *curr_num == extracted {
+            print!("{}{curr_num:2}{}", Colors::green(), Colors::reset()); // Bold green for the last number
+        } else if *is_marked {
+            print!("{}{curr_num:2}{}", Colors::yellow(), Colors::reset()); // Bold yellow for marked numbers
         } else {
             print!("{curr_num:2}");
         }
-        prev_num = curr_num;
+        prev_num = *curr_num;
     }
 }
 
 // Function to output the last n previous numbers from the board
-pub fn print_last_numbers(board: &[NumberEntry], n: usize) -> Vec<u8> {
-    if board.len() <= 1 {
-        return Vec::new();
-    }
-
-    let available_previous = board.len() - 1;
-    let numbers_to_show = std::cmp::min(n, available_previous);
-    let start_index = board.len() - numbers_to_show - 1;
-    let end_index = board.len() - 1;
-
-    let mut result: Vec<u8> = board[start_index..end_index]
-        .iter()
-        .map(|entry| entry.number)
-        .collect();
-    result.reverse();
-    result
+pub fn print_last_numbers(board: &Board, n: usize) -> Vec<Number> {
+    board.get_last_numbers(n)
 }
 
 pub fn show_on_terminal(
-    board: &[NumberEntry],
-    pouch: &[u8],
-    extracted: u8,
-    scorecard: &mut u8,
+    board: &Board,
+    pouch: &[Number],
+    extracted: Number,
+    scorecard: &mut Number,
     itemsleft: usize,
 ) {
-    println!("Last number: \x1b[1;32m{extracted}\x1b[0m");
+    println!("Last number: {}{extracted}{}", Colors::green(), Colors::reset());
     println!("Previous numbers: {:?}", print_last_numbers(board, 3));
     println!("\nCurrent board:");
     print_board(board, extracted);
@@ -107,23 +92,22 @@ pub fn show_on_terminal(
 
     // Mark numbers only if scorecard reaches a NEW goal
     match *scorecard {
-        2 => println!("\n\x1b[1;33mTWO in line\x1b[0m"),
-        3 => println!("\n\x1b[1;33mTHREE in line\x1b[0m"),
-        4 => println!("\n\x1b[1;33mFOUR in line\x1b[0m"),
-        5 => println!("\n\x1b[1;33mFIVE in line\x1b[0m"),
-        x if x == NUMBERSPERCARD => println!("\n\x1b[1;33mBINGO!!!\x1b[0m"),
+        2 => println!("\n{}TWO in line{}", Colors::yellow(), Colors::reset()),
+        3 => println!("\n{}THREE in line{}", Colors::yellow(), Colors::reset()),
+        4 => println!("\n{}FOUR in line{}", Colors::yellow(), Colors::reset()),
+        5 => println!("\n{}FIVE in line{}", Colors::yellow(), Colors::reset()),
+        x if x == NUMBERSPERCARD => println!("\n{}BINGO!!!{}", Colors::yellow(), Colors::reset()),
         _ => {}
     }
 
-    match itemsleft {
-        0 => println!("\nThe pouch is empty!"),
-        _ => {
-            println!("\nRemaining in pouch {itemsleft}:");
-            for &pouch_num in pouch {
-                print!("{pouch_num:2} ");
-            }
-            println!();
+    if itemsleft == 0 { 
+        println!("\nThe pouch is empty!"); 
+    } else {
+        println!("\nRemaining in pouch {itemsleft}:");
+        for &pouch_num in pouch {
+            print!("{pouch_num:2} ");
         }
+        println!();
     }
 
     println!();
@@ -160,13 +144,10 @@ pub fn hitkey () -> bool {
     disable_raw_mode().unwrap();
     print!("\x1Bc"); // Clear the screen
 
-    match result {
-        true => {
-            println!("Exiting the game.\n");
-        },
-        false => {
-            println!("Continuing the game...\n");
-        }
+    if result {
+        println!("Exiting the game.\n");
+    } else {
+        println!("Continuing the game...\n");
     }
 
     result

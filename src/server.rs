@@ -9,12 +9,15 @@ use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 use http_body_util::Full;
 use serde_json::json;
-use crate::defs::NumberEntry;
+
+// Import Board from board module
+use crate::board::Board;
+use crate::defs::Number;
 
 // Response structures for JSON serialization
 #[derive(serde::Serialize)]
 struct BoardResponse {
-    board: Vec<u8>,
+    board: Vec<Number>,
 }
 
 #[derive(serde::Serialize)]
@@ -23,7 +26,7 @@ struct ErrorResponse {
 }
 
 // Start the HTTP server with Tokio
-pub fn start_server(board_ref: Arc<Mutex<Vec<NumberEntry>>>) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>) {
+pub fn start_server(board_ref: Arc<Mutex<Board>>) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>) {
     let shutdown_signal = Arc::new(AtomicBool::new(false));
     let shutdown_clone = Arc::clone(&shutdown_signal);
     
@@ -77,7 +80,6 @@ pub fn start_server(board_ref: Arc<Mutex<Vec<NumberEntry>>>) -> (tokio::task::Jo
                 }
                 Err(_) => {
                     // Timeout occurred, continue to check shutdown signal
-                    continue;
                 }
             }
         }
@@ -88,9 +90,10 @@ pub fn start_server(board_ref: Arc<Mutex<Vec<NumberEntry>>>) -> (tokio::task::Jo
 }
 
 // Handle HTTP requests asynchronously
+#[allow(clippy::unused_async)]
 async fn handle_request(
     req: Request<hyper::body::Incoming>,
-    board_ref: Arc<Mutex<Vec<NumberEntry>>>,
+    board_ref: Arc<Mutex<Board>>,
 ) -> Result<Response<Full<Bytes>>, Infallible> {
     let response = match (req.method(), req.uri().path()) {
         (&Method::GET, "/board") => {
@@ -137,16 +140,16 @@ async fn handle_request(
 }
 
 // Function to get numbers from the board reference
-fn get_numbers_from_board(board_ref: &Arc<Mutex<Vec<NumberEntry>>>) -> Vec<u8> {
+fn get_numbers_from_board(board_ref: &Arc<Mutex<Board>>) -> Vec<Number> {
     if let Ok(board) = board_ref.lock() {
-        board.iter().map(|entry| entry.number).collect()
+        board.get_numbers()
     } else {
         Vec::new()
     }
 }
 
 // Function to get the board length
-fn get_board_length(board_ref: &Arc<Mutex<Vec<NumberEntry>>>) -> usize {
+fn get_board_length(board_ref: &Arc<Mutex<Board>>) -> usize {
     if let Ok(board) = board_ref.lock() {
         board.len()
     } else {
