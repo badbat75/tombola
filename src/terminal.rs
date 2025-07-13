@@ -111,7 +111,7 @@ pub fn show_on_terminal(
         3 => println!("\n\x1b[1;33mTHREE in line\x1b[0m"),
         4 => println!("\n\x1b[1;33mFOUR in line\x1b[0m"),
         5 => println!("\n\x1b[1;33mFIVE in line\x1b[0m"),
-        x if x == NUMBERSPERCARD as u8 => println!("\n\x1b[1;33mBINGO!!!\x1b[0m"),
+        x if x == NUMBERSPERCARD => println!("\n\x1b[1;33mBINGO!!!\x1b[0m"),
         _ => {}
     }
 

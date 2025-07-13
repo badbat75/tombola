@@ -41,7 +41,7 @@ pub fn tombola_prize_check(board: &mut [NumberEntry], extracted: u8, scorecard: 
         
         // If this card is complete (15 numbers), set scorecard to 15
         if card_numbers_found == NUMBERSPERCARD {
-            *scorecard = NUMBERSPERCARD as u8;
+            *scorecard = NUMBERSPERCARD;
             bingo_found = true;
             break;
         }
@@ -102,7 +102,7 @@ pub fn tombola_prize_check(board: &mut [NumberEntry], extracted: u8, scorecard: 
                     }
                 }
             },
-            x if x == NUMBERSPERCARD as u8 => {
+            x if x == NUMBERSPERCARD => {
                 // First, unmark all numbers (BINGO overrides everything)
                 for entry in board.iter_mut() {
                     entry.is_marked = false;

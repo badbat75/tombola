@@ -35,7 +35,7 @@ pub fn start_server(board_ref: Arc<Mutex<Vec<NumberEntry>>>) -> (tokio::task::Jo
                 listener
             }
             Err(e) => {
-                eprintln!("Failed to start API server: {}", e);
+                eprintln!("Failed to start API server: {e}");
                 return;
             }
         };
@@ -67,12 +67,12 @@ pub fn start_server(board_ref: Arc<Mutex<Vec<NumberEntry>>>) -> (tokio::task::Jo
                             .serve_connection(io, service)
                             .await
                         {
-                            eprintln!("Error serving connection: {:?}", err);
+                            eprintln!("Error serving connection: {err:?}");
                         }
                     });
                 }
                 Ok(Err(e)) => {
-                    eprintln!("Error accepting connection: {}", e);
+                    eprintln!("Error accepting connection: {e}");
                     break;
                 }
                 Err(_) => {

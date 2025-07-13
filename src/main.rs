@@ -43,11 +43,8 @@ async fn main() {
 
     while ! pouch.is_empty() {
         // Expect event for next extraction
-        match next_extraction(IO) {
-            true => {
-                break;
-            }
-            false => {}
+        if next_extraction(IO) {
+            break;
         }
         // Randomly extract a number index from the pouch
         let random_index = rand::random_range(0..itemsleft);
@@ -80,7 +77,7 @@ async fn main() {
     
     // Wait for the server thread to finish
     if let Err(e) = server_handle.await {
-        eprintln!("Error waiting for server shutdown: {:?}", e);
+        eprintln!("Error waiting for server shutdown: {e:?}");
     }
     
     println!("API server stopped successfully.");
