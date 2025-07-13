@@ -1,10 +1,13 @@
 // src/main.rs
 // This is the main entry point for the Tombola game.
 
+use std::sync::{Arc, Mutex};
+
 mod defs;
 use defs::*;
 mod prize;
 mod terminal;
+mod server;
 
 enum IOList {
     Terminal,
@@ -26,11 +29,17 @@ fn show_on(iodevice: IOList, board: &[NumberEntry], pouch: &[u8], extracted: u8,
 }
 
 // Function to wait for a key press and return true if ESC is pressed, false otherwise
-fn main() {
+#[tokio::main]
+async fn main() {
     let mut pouch: Vec<u8> = (FIRSTNUMBER..=LASTNUMBER).collect();
-    let mut board: Vec<NumberEntry> = Vec::new();
     let mut itemsleft = pouch.len();
     let mut scorecard = 0;
+
+    // Create a shared reference to the board (single source of truth)
+    let board_ref = Arc::new(Mutex::new(Vec::new()));
+    
+    // Start the API server in the background with the board reference
+    let (server_handle, shutdown_signal) = server::start_server(Arc::clone(&board_ref));
 
     while ! pouch.is_empty() {
         // Expect event for next extraction
@@ -43,18 +52,36 @@ fn main() {
         // Randomly extract a number index from the pouch
         let random_index = rand::random_range(0..itemsleft);
         let extracted = pouch.remove(random_index);
-        // Add the extracted number to the board
-        board.push(NumberEntry {
-            number: extracted,
-            is_marked: false,
-        });
+        
         itemsleft = pouch.len();
-        // Check the score based on the current board and extracted number
-        prize::tombola_prize_check(&mut board, extracted, &mut scorecard);
-        // Show the current state on configured IO device
-        show_on(IO, &board, &pouch, extracted, &mut scorecard, itemsleft);
+        
+        // Lock the shared board once and perform all operations
+        if let Ok(mut board) = board_ref.lock() {
+            // Add the extracted number to the shared board
+            board.push(NumberEntry {
+                number: extracted,
+                is_marked: false,
+            });
+            
+            // Check the score based on the current board and extracted number
+            prize::tombola_prize_check(&mut board, extracted, &mut scorecard);
+            
+            // Show the current state on configured IO device
+            show_on(IO, &board, &pouch, extracted, &mut scorecard, itemsleft);
+        }
 
         // If the scorecard reaches the number of numbers per card, break the loop
         if scorecard == NUMBERSPERCARD { break };
     }
+    
+    // Signal the server to shutdown
+    shutdown_signal.store(true, std::sync::atomic::Ordering::Relaxed);
+    println!("Game ended. Shutting down API server...");
+    
+    // Wait for the server thread to finish
+    if let Err(e) = server_handle.await {
+        eprintln!("Error waiting for server shutdown: {:?}", e);
+    }
+    
+    println!("API server stopped successfully.");
 }

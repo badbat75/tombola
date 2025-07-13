@@ -1,5 +1,7 @@
 // src/defs.rs
 // This module defines the basic structures and constants used in the Tombola game.
+use serde::{Deserialize, Serialize};
+
 pub struct BoardStruct {
     pub cols_per_card: u8,
     pub rows_per_card: u8,
@@ -22,7 +24,7 @@ pub const BOARDCONFIG: BoardStruct = BoardStruct {
     vcards_space: 1, // space between cards in the same column
 };
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct NumberEntry {
     pub number: u8,
     pub is_marked: bool,
