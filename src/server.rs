@@ -13,11 +13,6 @@ use crate::defs::NumberEntry;
 
 // Response structures for JSON serialization
 #[derive(serde::Serialize)]
-struct LastNumberResponse {
-    last_number: u8,
-}
-
-#[derive(serde::Serialize)]
 struct BoardResponse {
     board: Vec<u8>,
 }
@@ -98,32 +93,6 @@ async fn handle_request(
     board_ref: Arc<Mutex<Vec<NumberEntry>>>,
 ) -> Result<Response<Full<Bytes>>, Infallible> {
     let response = match (req.method(), req.uri().path()) {
-        (&Method::GET, "/last_number") => {
-            match get_last_number(&board_ref) {
-                Some(number) => {
-                    let response = LastNumberResponse { last_number: number };
-                    let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
-                    Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", "application/json")
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(Full::new(Bytes::from(body)))
-                        .unwrap()
-                }
-                None => {
-                    let response = ErrorResponse {
-                        error: "No number extracted yet".to_string(),
-                    };
-                    let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
-                    Response::builder()
-                        .status(StatusCode::NOT_FOUND)
-                        .header("Content-Type", "application/json")
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(Full::new(Bytes::from(body)))
-                        .unwrap()
-                }
-            }
-        }
         (&Method::GET, "/board") => {
             let numbers = get_numbers_from_board(&board_ref);
             let response = BoardResponse { board: numbers };
@@ -165,15 +134,6 @@ async fn handle_request(
     };
 
     Ok(response)
-}
-
-// Function to get the last extracted number from the board reference
-fn get_last_number(board_ref: &Arc<Mutex<Vec<NumberEntry>>>) -> Option<u8> {
-    if let Ok(board) = board_ref.lock() {
-        board.last().map(|entry| entry.number)
-    } else {
-        None
-    }
 }
 
 // Function to get numbers from the board reference
