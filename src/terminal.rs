@@ -83,10 +83,10 @@ pub fn print_last_numbers(board: &Board, n: usize) -> Vec<Number> {
 pub fn show_on_terminal(
     board: &Board,
     pouch: &[Number],
-    scorecard: &mut Number,
 ) {
     // Get the last extracted number from the board
     let extracted = board.get_last_numbers(1).first().copied().unwrap_or(0);
+    let scorecard = board.get_scorecard();
     
     println!("Last number: {}{extracted}{}", Colors::green(), Colors::reset());
     println!("Previous numbers: {:?}", print_last_numbers(board, 3));
@@ -95,7 +95,7 @@ pub fn show_on_terminal(
     println!();
 
     // Mark numbers only if scorecard reaches a NEW goal
-    match *scorecard {
+    match scorecard {
         2 => println!("\n{}TWO in line{}", Colors::yellow(), Colors::reset()),
         3 => println!("\n{}THREE in line{}", Colors::yellow(), Colors::reset()),
         4 => println!("\n{}FOUR in line{}", Colors::yellow(), Colors::reset()),

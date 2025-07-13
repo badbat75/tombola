@@ -24,9 +24,9 @@ fn next_extraction (iodevice: IOList) -> bool {
     }
 }
 
-fn show_on(iodevice: IOList, board: &Board, pouch: &[Number], scorecard: &mut Number) {
+fn show_on(iodevice: IOList, board: &Board, pouch: &[Number]) {
     match iodevice {
-        IOList::Terminal => { terminal::show_on_terminal(board, pouch, scorecard) }
+        IOList::Terminal => { terminal::show_on_terminal(board, pouch) }
     }
 }
 
@@ -35,12 +35,11 @@ fn show_on(iodevice: IOList, board: &Board, pouch: &[Number], scorecard: &mut Nu
 async fn main() {
     let mut pouch: Vec<Number> = (FIRSTNUMBER..=LASTNUMBER).collect();
 
-    // Create shared references to the board and scorecard (single source of truth)
+    // Create shared reference to the board (single source of truth)
     let board_ref = Arc::new(Mutex::new(Board::new()));
-    let scorecard_ref = Arc::new(Mutex::new(0));
     
-    // Start the API server in the background with the board and scorecard references
-    let (server_handle, shutdown_signal) = server::start_server(Arc::clone(&board_ref), Arc::clone(&scorecard_ref));
+    // Start the API server in the background with the board reference
+    let (server_handle, shutdown_signal) = server::start_server(Arc::clone(&board_ref));
 
     while ! pouch.is_empty() {
         // Expect event for next extraction
@@ -51,18 +50,16 @@ async fn main() {
         let random_index = rand::random_range(0..pouch.len());
         let extracted: Number = pouch.remove(random_index);
         
-        // Lock the shared board and scorecard once and perform all operations
+        // Lock the shared board and perform all operations
         if let Ok(mut board) = board_ref.lock() {
-            if let Ok(mut scorecard) = scorecard_ref.lock() {
-                // Add the extracted number to the shared board and check for prizes
-                board.push(extracted, &mut scorecard);
-                
-                // Show the current state on configured IO device
-                show_on(IO, &board, &pouch, &mut scorecard);
-                
-                // If the scorecard reaches the number of numbers per card, break the loop
-                if *scorecard == NUMBERSPERCARD { break }
-            }
+            // Add the extracted number to the shared board and check for prizes
+            board.push(extracted);
+            
+            // Show the current state on configured IO device
+            show_on(IO, &board, &pouch);
+            
+            // If the scorecard reaches the number of numbers per card, break the loop
+            if board.get_scorecard() == NUMBERSPERCARD { break }
         }
     }
     

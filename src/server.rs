@@ -31,7 +31,7 @@ struct ErrorResponse {
 }
 
 // Start the HTTP server with Tokio
-pub fn start_server(board_ref: Arc<Mutex<Board>>, scorecard_ref: Arc<Mutex<Number>>) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>) {
+pub fn start_server(board_ref: Arc<Mutex<Board>>) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>) {
     let shutdown_signal = Arc::new(AtomicBool::new(false));
     let shutdown_clone = Arc::clone(&shutdown_signal);
     
@@ -63,13 +63,12 @@ pub fn start_server(board_ref: Arc<Mutex<Board>>, scorecard_ref: Arc<Mutex<Numbe
             match accept_result {
                 Ok(Ok((stream, _))) => {
                     let board_clone = Arc::clone(&board_ref);
-                    let scorecard_clone = Arc::clone(&scorecard_ref);
                     let io = TokioIo::new(stream);
                     
                     // Spawn a task to handle the connection
                     tokio::spawn(async move {
                         let service = service_fn(move |req| {
-                            handle_request(req, Arc::clone(&board_clone), Arc::clone(&scorecard_clone))
+                            handle_request(req, Arc::clone(&board_clone))
                         });
                         
                         if let Err(err) = http1::Builder::new()
@@ -100,7 +99,6 @@ pub fn start_server(board_ref: Arc<Mutex<Board>>, scorecard_ref: Arc<Mutex<Numbe
 async fn handle_request(
     req: Request<hyper::body::Incoming>,
     board_ref: Arc<Mutex<Board>>,
-    scorecard_ref: Arc<Mutex<Number>>,
 ) -> Result<Response<Full<Bytes>>, Infallible> {
     let response = match (req.method(), req.uri().path()) {
         (&Method::GET, "/board") => {
@@ -115,7 +113,7 @@ async fn handle_request(
                 .unwrap()
         }
         (&Method::GET, "/scorecard") => {
-            let scorecard = get_scorecard(&scorecard_ref);
+            let scorecard = get_scorecard_from_board(&board_ref);
             let response = ScorecardResponse { scorecard };
             let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
             Response::builder()
@@ -127,7 +125,7 @@ async fn handle_request(
         }
         (&Method::GET, "/status") => {
             let board_len = get_board_length(&board_ref);
-            let scorecard = get_scorecard(&scorecard_ref);
+            let scorecard = get_scorecard_from_board(&board_ref);
             let response = json!({
                 "status": "running",
                 "numbers_extracted": board_len,
@@ -177,10 +175,10 @@ fn get_board_length(board_ref: &Arc<Mutex<Board>>) -> usize {
     }
 }
 
-// Function to get the scorecard value
-fn get_scorecard(scorecard_ref: &Arc<Mutex<Number>>) -> Number {
-    if let Ok(scorecard) = scorecard_ref.lock() {
-        *scorecard
+// Function to get the scorecard value from the board
+fn get_scorecard_from_board(board_ref: &Arc<Mutex<Board>>) -> Number {
+    if let Ok(board) = board_ref.lock() {
+        board.get_scorecard()
     } else {
         0
     }
