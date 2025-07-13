@@ -24,9 +24,9 @@ fn next_extraction (iodevice: IOList) -> bool {
     }
 }
 
-fn show_on(iodevice: IOList, board: &Board, pouch: &[Number], extracted: Number, scorecard: &mut Number, itemsleft: usize) {
+fn show_on(iodevice: IOList, board: &Board, pouch: &[Number], scorecard: &mut Number) {
     match iodevice {
-        IOList::Terminal => { terminal::show_on_terminal(board, pouch, extracted, scorecard, itemsleft) }
+        IOList::Terminal => { terminal::show_on_terminal(board, pouch, scorecard) }
     }
 }
 
@@ -34,7 +34,6 @@ fn show_on(iodevice: IOList, board: &Board, pouch: &[Number], extracted: Number,
 #[tokio::main]
 async fn main() {
     let mut pouch: Vec<Number> = (FIRSTNUMBER..=LASTNUMBER).collect();
-    let mut itemsleft = pouch.len();
     let mut scorecard = 0;
 
     // Create a shared reference to the board (single source of truth)
@@ -49,10 +48,8 @@ async fn main() {
             break;
         }
         // Randomly extract a number index from the pouch
-        let random_index = rand::random_range(0..itemsleft);
+        let random_index = rand::random_range(0..pouch.len());
         let extracted: Number = pouch.remove(random_index);
-        
-        itemsleft = pouch.len();
         
         // Lock the shared board once and perform all operations
         if let Ok(mut board) = board_ref.lock() {
@@ -60,7 +57,7 @@ async fn main() {
             board.push(extracted, &mut scorecard);
             
             // Show the current state on configured IO device
-            show_on(IO, &board, &pouch, extracted, &mut scorecard, itemsleft);
+            show_on(IO, &board, &pouch, &mut scorecard);
         }
 
         // If the scorecard reaches the number of numbers per card, break the loop

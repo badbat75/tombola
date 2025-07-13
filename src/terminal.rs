@@ -51,9 +51,12 @@ pub fn downrightshift(prev_num: Number, curr_num: Number) -> DeltaPos {
     }
 }
 
-pub fn print_board(board: &Board, extracted: Number) {
+pub fn print_board(board: &Board) {
     let sorted_entries = board.get_sorted_entries();
     let mut prev_num = 0;
+    // Get the last extracted number from the board
+    let extracted = board.get_last_numbers(1).first().copied().unwrap_or(0);
+    
     for (curr_num, is_marked) in &sorted_entries {
         for _ in 0..downrightshift(prev_num, *curr_num).delta_y {
             println!();
@@ -80,14 +83,15 @@ pub fn print_last_numbers(board: &Board, n: usize) -> Vec<Number> {
 pub fn show_on_terminal(
     board: &Board,
     pouch: &[Number],
-    extracted: Number,
     scorecard: &mut Number,
-    itemsleft: usize,
 ) {
+    // Get the last extracted number from the board
+    let extracted = board.get_last_numbers(1).first().copied().unwrap_or(0);
+    
     println!("Last number: {}{extracted}{}", Colors::green(), Colors::reset());
     println!("Previous numbers: {:?}", print_last_numbers(board, 3));
     println!("\nCurrent board:");
-    print_board(board, extracted);
+    print_board(board);
     println!();
 
     // Mark numbers only if scorecard reaches a NEW goal
@@ -100,10 +104,10 @@ pub fn show_on_terminal(
         _ => {}
     }
 
-    if itemsleft == 0 { 
+    if pouch.is_empty() { 
         println!("\nThe pouch is empty!"); 
     } else {
-        println!("\nRemaining in pouch {itemsleft}:");
+        println!("\nRemaining in pouch {}:", pouch.len());
         for &pouch_num in pouch {
             print!("{pouch_num:2} ");
         }
