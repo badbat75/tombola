@@ -181,50 +181,6 @@ impl TombolaGenerator {
         cards
     }
 
-    fn validate_cards(&self, cards: &[CardWithId]) -> bool {
-        for card_with_id in cards {
-            let card = &card_with_id.card;
-            // Verify numbers per row
-            for row in card {
-                let numbers_in_row = row.iter().filter(|cell| cell.is_some()).count();
-                if numbers_in_row != BOARDCONFIG.cols_per_card as usize {
-                    return false;
-                }
-            }
-            
-            // Verify total numbers per card
-            let total_numbers: usize = card.iter()
-                .flat_map(|row| row.iter())
-                .filter(|cell| cell.is_some())
-                .count();
-            
-            if total_numbers != ((LASTNUMBER - FIRSTNUMBER + 1) / CARDSNUMBER) as usize {
-                return false;
-            }
-        }
-        true
-    }
-
-    fn print_cards(&self, cards: &[CardWithId]) {
-        for (i, card_with_id) in cards.iter().enumerate() {
-            println!("=== CARD {} (ID: {:016X}) ===", i + 1, card_with_id.id);
-            for row in &card_with_id.card {
-                for cell in row {
-                    match cell {
-                        Some(number) => print!("{:3} ", number),
-                        None => print!("  . "),
-                    }
-                }
-                
-                // Check if row has exactly cols_per_card numbers
-                let numbers_in_row = row.iter().filter(|cell| cell.is_some()).count();
-                let is_valid = numbers_in_row == BOARDCONFIG.cols_per_card as usize;
-                println!(" {}", if is_valid { "✓" } else { "✗" });
-            }
-            println!();
-        }
-    }
-
     fn calculate_row_assignments(&self, card_numbers: &[Vec<Number>], columns: usize) -> Vec<Vec<usize>> {
         let mut row_assignments = vec![Vec::new(); columns];
         let mut row_counts = vec![0; BOARDCONFIG.rows_per_card as usize];
