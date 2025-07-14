@@ -6,3 +6,4 @@ pub mod pouch;
 pub mod board;
 pub mod terminal;
 pub mod server;
+pub mod card;

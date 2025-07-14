@@ -1,30 +1,28 @@
-use tombola::defs::{Number, FIRSTNUMBER, LASTNUMBER, CARDSNUMBER, BOARDCONFIG};
+use crate::defs::{Number, FIRSTNUMBER, LASTNUMBER, CARDSNUMBER, BOARDCONFIG};
 
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
-use std::env;
 use rand::seq::SliceRandom;
 use rand::rng;
 
 #[derive(Debug, Clone)]
-struct TombolaGenerator;
+pub struct TombolaGenerator;
 
 #[derive(Debug, Clone)]
-struct CardWithId {
-    id: u64,
-    card: Card,
+pub struct CardWithId {
+    pub id: u64,
+    pub card: Card,
 }
 
-type Card = Vec<Vec<Option<Number>>>;  // BOARDCONFIG.rows_per_card rows × (LASTNUMBER/10) columns
+pub type Card = Vec<Vec<Option<Number>>>;  // BOARDCONFIG.rows_per_card rows × (LASTNUMBER/10) columns
 
 impl TombolaGenerator {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self
     }
 
-    fn generate_card_group(&self) -> Vec<Card> {
+    pub fn generate_card_group(&self) -> Vec<Card> {
         let columns = ((LASTNUMBER - FIRSTNUMBER + 1) / 10) as usize;  // Dynamic column calculation
         let numbers_per_card = ((LASTNUMBER - FIRSTNUMBER + 1) / CARDSNUMBER) as usize;
         
@@ -249,7 +247,7 @@ impl TombolaGenerator {
         row_assignments
     }
 
-    fn generate_cards(&self, requested_cards: usize) -> Vec<CardWithId> {
+    pub fn generate_cards(&self, requested_cards: usize) -> Vec<CardWithId> {
         let mut all_cards = Vec::new();
         let mut remaining_cards = requested_cards;
         let mut rng = rng();
@@ -342,7 +340,7 @@ impl TombolaGenerator {
         hasher.finish()
     }
 
-    fn generate_card_group_with_ids(&self) -> Vec<CardWithId> {
+    pub fn generate_card_group_with_ids(&self) -> Vec<CardWithId> {
         const MAX_RETRIES: usize = 100;
         let mut attempt = 0;
         
@@ -412,137 +410,4 @@ impl TombolaGenerator {
     }
 
     // ...existing code...
-}
-
-fn main() {
-    // Parse command line arguments
-    let args: Vec<String> = env::args().collect();
-    let mut requested_cards = CARDSNUMBER as usize; // Default to 6 cards
-    let mut search_card_id: Option<u64> = None;
-    
-    // Parse --cardno parameter
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--cardno" => {
-                if i + 1 < args.len() {
-                    match args[i + 1].parse::<usize>() {
-                        Ok(num) => {
-                            requested_cards = num;
-                            i += 2;
-                        }
-                        Err(_) => {
-                            eprintln!("Error: Invalid number for --cardno parameter");
-                            std::process::exit(1);
-                        }
-                    }
-                } else {
-                    eprintln!("Error: --cardno requires a number");
-                    std::process::exit(1);
-                }
-            }
-            "--findcard" => {
-                if i + 1 < args.len() {
-                    match u64::from_str_radix(&args[i + 1], 16) {
-                        Ok(id) => {
-                            search_card_id = Some(id);
-                            i += 2;
-                        }
-                        Err(_) => {
-                            eprintln!("Error: Invalid hexadecimal card ID for --findcard parameter");
-                            std::process::exit(1);
-                        }
-                    }
-                } else {
-                    eprintln!("Error: --findcard requires a hexadecimal card ID");
-                    std::process::exit(1);
-                }
-            }
-            "--help" | "-h" => {
-                println!("Usage: {} [--cardno <number>] [--findcard <hex_id>]", args[0]);
-                println!("  --cardno <number>     Generate specified number of cards (default: 6)");
-                println!("                        If <= 6: generates 6 cards and randomly selects the requested number");
-                println!("                        If > 6: generates complete blocks of 6 cards until target is reached");
-                println!("  --findcard <hex_id>   Search for a specific card by its hexadecimal ID");
-                println!("                        Example: --findcard 2C64E92C1BB7EE63");
-                std::process::exit(0);
-            }
-            _ => {
-                eprintln!("Error: Unknown parameter '{}'", args[i]);
-                eprintln!("Usage: {} [--cardno <number>] [--findcard <hex_id>]", args[0]);
-                eprintln!("Use --help for more information");
-                std::process::exit(1);
-            }
-        }
-    }
-    
-    // Validate requested cards
-    if requested_cards == 0 {
-        eprintln!("Error: Number of cards must be greater than 0");
-        std::process::exit(1);
-    }
-    
-    // The generator now uses global constants defined in lib.rs
-    let generator = TombolaGenerator::new();
-    
-    let cards = generator.generate_cards(requested_cards);
-    
-    println!("Generation completed!");
-    println!("Requested cards: {}", requested_cards);
-    println!("Generated cards: {}", cards.len());
-    println!("Valid cards: {}", generator.validate_cards(&cards));
-    
-    // Handle card search if requested
-    if let Some(card_id) = search_card_id {
-        println!("\n=== SEARCHING FOR CARD ID: {:016X} ===", card_id);
-        generator.print_card_by_id(&cards, card_id);
-        
-        // Also show all available IDs for reference
-        println!("\nAll available card IDs in this generation:");
-        generator.list_all_card_ids(&cards);
-        return; // Exit after showing the specific card
-    }
-    
-    // Display card IDs
-    println!("Card IDs:");
-    for (i, card_with_id) in cards.iter().enumerate() {
-        println!("  Card {}: {:016X}", i + 1, card_with_id.id);
-    }
-    println!();
-    
-    generator.print_cards(&cards);
-    
-    // Verify distribution
-    let mut number_count = HashMap::new();
-    for card_with_id in &cards {
-        let card = &card_with_id.card;
-        for row in card {
-            for cell in row {
-                if let Some(number) = cell {
-                    *number_count.entry(*number).or_insert(0) += 1;
-                }
-            }
-        }
-    }
-    
-    let complete_blocks = requested_cards / (CARDSNUMBER as usize);
-    let remaining_cards_in_partial_block = requested_cards % (CARDSNUMBER as usize);
-    
-    println!("Numbers used: {}", number_count.len());
-    
-    if complete_blocks == 0 {
-        // Only partial block: each number should appear exactly once
-        println!("All numbers present exactly once: {}", 
-                 number_count.values().all(|&count| count == 1));
-    } else if remaining_cards_in_partial_block == 0 {
-        // Only complete blocks: each number should appear exactly 'complete_blocks' times
-        println!("All numbers present exactly {} times: {}", 
-                 complete_blocks,
-                 number_count.values().all(|&count| count == complete_blocks));
-    } else {
-        // Mixed blocks: numbers in partial block appear 'complete_blocks + 1' times,
-        // others appear 'complete_blocks' times
-        println!("Numbers distribution valid for {} complete blocks + {} partial cards", 
-                 complete_blocks, remaining_cards_in_partial_block);
-    }
 }

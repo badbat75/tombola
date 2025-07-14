@@ -7,6 +7,7 @@ use tokio::time::sleep;
 struct RegisterRequest {
     name: String,
     client_type: String,
+    nocard: Option<u32>,  // Number of cards to generate during registration
 }
 
 // Client registration response
@@ -38,6 +39,39 @@ struct ErrorResponse {
     error: String,
 }
 
+// Card generation request
+#[derive(Debug, Serialize)]
+struct GenerateCardsRequest {
+    count: u32,
+}
+
+// Card generation response
+#[derive(Debug, Deserialize)]
+pub struct GenerateCardsResponse {
+    pub cards: Vec<CardInfo>,
+    pub message: String,
+}
+
+// Card info structure
+#[derive(Debug, Deserialize)]
+pub struct CardInfo {
+    pub card_id: String,
+    pub card_data: Vec<Vec<Option<u8>>>, // 2D vector of optional u8 values
+}
+
+// List assigned cards response
+#[derive(Debug, Deserialize)]
+pub struct ListAssignedCardsResponse {
+    pub cards: Vec<AssignedCardInfo>,
+}
+
+// Assigned card info
+#[derive(Debug, Deserialize)]
+pub struct AssignedCardInfo {
+    pub card_id: String,
+    pub assigned_to: String,
+}
+
 // Tombola client structure
 #[derive(Debug)]
 pub struct TombolaClient {
@@ -46,6 +80,7 @@ pub struct TombolaClient {
     server_url: String,
     http_client: reqwest::Client,
     registered: bool,
+    nocard: Option<u32>,  // Number of cards to generate during registration
 }
 
 impl TombolaClient {
@@ -62,6 +97,7 @@ impl TombolaClient {
             server_url: server_url.to_string(),
             http_client,
             registered: false,
+            nocard: None,
         }
     }
 
@@ -75,6 +111,7 @@ impl TombolaClient {
         let register_request = RegisterRequest {
             name: self.client_name.clone(),
             client_type: "tombola_client".to_string(),
+            nocard: self.nocard, // Include nocard in the registration request
         };
 
         let url = format!("{}/register", self.server_url);
@@ -101,6 +138,16 @@ impl TombolaClient {
             let error_text = response.text().await?;
             Err(format!("Registration failed: {}", error_text).into())
         }
+    }
+
+    /// Set the number of cards to generate during registration
+    pub fn set_nocard(&mut self, count: u32) {
+        self.nocard = Some(count);
+    }
+
+    /// Clear the nocard option
+    pub fn clear_nocard(&mut self) {
+        self.nocard = None;
     }
 
     /// Get the client ID (must be registered first)
@@ -173,6 +220,72 @@ impl TombolaClient {
         } else {
             let error_response: ErrorResponse = response.json().await?;
             Err(format!("Failed to get pouch: {}", error_response.error).into())
+        }
+    }
+
+    /// Generate cards for the client
+    pub async fn generate_cards(&self, count: u32) -> Result<GenerateCardsResponse, Box<dyn std::error::Error>> {
+        self.ensure_registered()?;
+        
+        let request = GenerateCardsRequest { count };
+        let url = format!("{}/generatecardsforme", self.server_url);
+        
+        let response = self
+            .http_client
+            .post(&url)
+            .header("X-Client-ID", self.client_id.as_ref().unwrap())
+            .json(&request)
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let generate_response: GenerateCardsResponse = response.json().await?;
+            Ok(generate_response)
+        } else {
+            let error_response: ErrorResponse = response.json().await?;
+            Err(format!("Failed to generate cards: {}", error_response.error).into())
+        }
+    }
+
+    /// List assigned cards for the client
+    pub async fn list_assigned_cards(&self) -> Result<ListAssignedCardsResponse, Box<dyn std::error::Error>> {
+        self.ensure_registered()?;
+        
+        let url = format!("{}/listassignedcards", self.server_url);
+        let response = self
+            .http_client
+            .get(&url)
+            .header("X-Client-ID", self.client_id.as_ref().unwrap())
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let list_response: ListAssignedCardsResponse = response.json().await?;
+            Ok(list_response)
+        } else {
+            let error_response: ErrorResponse = response.json().await?;
+            Err(format!("Failed to list assigned cards: {}", error_response.error).into())
+        }
+    }
+
+    /// Get a specific assigned card by ID
+    pub async fn get_assigned_card(&self, card_id: &str) -> Result<CardInfo, Box<dyn std::error::Error>> {
+        self.ensure_registered()?;
+        
+        let url = format!("{}/getassignedcard/{}", self.server_url, card_id);
+        let response = self
+            .http_client
+            .get(&url)
+            .header("X-Client-ID", self.client_id.as_ref().unwrap())
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let card_info: CardInfo = response.json().await?;
+            Ok(card_info)
+        } else {
+            let error_response: ErrorResponse = response.json().await?;
+            Err(format!("Failed to get assigned card: {}", error_response.error).into())
         }
     }
 
@@ -251,35 +364,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create and register client
     let mut client = TombolaClient::new(&client_name, &server_url);
     
+    // Check for --nocard option
+    if args.iter().any(|arg| arg == "--nocard") {
+        client.set_nocard(1);
+        println!("🎴 Will request 1 card during registration");
+    }
+    
     // Register with server
     match client.register().await {
         Ok(()) => {
             println!("✅ Client registered successfully!");
             
-            // Test API calls
-            println!("\n🧪 Testing API calls...");
+            // Try to generate cards (will fail if --nocard was used)
+            let _ = client.generate_cards(3).await;
             
-            // Get board
-            match client.get_board().await {
-                Ok(board) => println!("📋 Board: {:?}", board),
-                Err(e) => println!("❌ Board error: {}", e),
+            // Get and display all assigned cards
+            match client.list_assigned_cards().await {
+                Ok(response) => {
+                    if response.cards.is_empty() {
+                        println!("No cards assigned to this client.");
+                    } else {
+                        println!("\n📇 Your Cards ({} total):", response.cards.len());
+                        
+                        for (index, card) in response.cards.iter().enumerate() {
+                            match client.get_assigned_card(&card.card_id).await {
+                                Ok(card_info) => {
+                                    print_card_as_table(index + 1, &card_info.card_id, &card_info.card_data);
+                                }
+                                Err(e) => {
+                                    println!("   ❌ Failed to get card {} details: {}", index + 1, e);
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => println!("❌ Failed to list assigned cards: {}", e),
             }
-            
-            // Get scorecard
-            match client.get_scorecard().await {
-                Ok(scorecard) => println!("🏆 Scorecard: {}", scorecard),
-                Err(e) => println!("❌ Scorecard error: {}", e),
-            }
-            
-            // Get pouch
-            match client.get_pouch().await {
-                Ok((pouch, remaining)) => println!("🎒 Pouch: {:?} (remaining: {})", pouch, remaining),
-                Err(e) => println!("❌ Pouch error: {}", e),
-            }
-            
-            // Start monitoring (uncomment to enable)
-            // client.start_monitoring(5).await?;
-            
         }
         Err(e) => {
             println!("❌ Registration failed: {}", e);
@@ -288,4 +408,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     
     Ok(())
+}
+
+fn print_card_as_table(card_number: usize, card_id: &str, card_data: &Vec<Vec<Option<u8>>>) {
+    println!("\n┌────────────────────────────────────────────────────────────────────────────────┐");
+    
+    // Calculate proper spacing for the title to align the right border
+    let title_text = format!("Card {} - ID: {}", card_number, card_id);
+    let box_width = 78; // Total width of the box content area (counting the actual characters)
+    let padding = if title_text.len() < box_width {
+        box_width - title_text.len()
+    } else {
+        0
+    };
+    
+    println!("│ {}{} │", title_text, " ".repeat(padding));
+    println!("├────────┬────────┬────────┬────────┬────────┬────────┬────────┬────────┬────────┤");
+    
+    for row in card_data {
+        print!("│");
+        for cell in row {
+            match cell {
+                Some(number) => print!("   {:2}   │", number),
+                None => print!("        │"),
+            }
+        }
+        println!();
+    }
+    
+    println!("└────────┴────────┴────────┴────────┴────────┴────────┴────────┴────────┴────────┘");
 }
