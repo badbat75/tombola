@@ -375,39 +375,4 @@ impl TombolaGenerator {
             println!("Duplicate card ID detected, regenerating group (attempt {})", attempt);
         }
     }
-
-    fn get_card_by_id<'a>(&self, cards: &'a [CardWithId], card_id: u64) -> Option<&'a CardWithId> {
-        cards.iter().find(|card| card.id == card_id)
-    }
-
-    fn print_card_by_id(&self, cards: &[CardWithId], card_id: u64) {
-        if let Some(card_with_id) = self.get_card_by_id(cards, card_id) {
-            println!("=== CARD DETAILS (ID: {:016X}) ===", card_with_id.id);
-            for row in &card_with_id.card {
-                for cell in row {
-                    match cell {
-                        Some(number) => print!("{:3} ", number),
-                        None => print!("  . "),
-                    }
-                }
-                
-                // Check if row has exactly cols_per_card numbers
-                let numbers_in_row = row.iter().filter(|cell| cell.is_some()).count();
-                let is_valid = numbers_in_row == BOARDCONFIG.cols_per_card as usize;
-                println!(" {}", if is_valid { "✓" } else { "✗" });
-            }
-            println!();
-        } else {
-            println!("Card with ID {:016X} not found", card_id);
-        }
-    }
-
-    fn list_all_card_ids(&self, cards: &[CardWithId]) {
-        println!("Available Card IDs:");
-        for (i, card_with_id) in cards.iter().enumerate() {
-            println!("  Card {}: {:016X}", i + 1, card_with_id.id);
-        }
-    }
-
-    // ...existing code...
 }
