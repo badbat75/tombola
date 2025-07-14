@@ -25,3 +25,11 @@ path = "src/tombola_server.rs"
 [[bin]]
 name = "tombola_client"
 path = "src/terminal_client.rs"
+
+[[bin]]
+name = "client"
+path = "src/client.rs"
+
+[[bin]]
+name = "cartella"
+path = "src/card.rs"

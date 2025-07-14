@@ -29,6 +29,7 @@ pub const BOARDCONFIG: BoardStruct = BoardStruct {
 pub const FIRSTNUMBER: Number = 1;
 pub const LASTNUMBER: Number = BOARDCONFIG.cols_per_card * BOARDCONFIG.rows_per_card * BOARDCONFIG.cards_per_row * BOARDCONFIG.cards_per_col - 1 + FIRSTNUMBER;
 pub const NUMBERSPERCARD: Number = BOARDCONFIG.cols_per_card * BOARDCONFIG.rows_per_card;
+pub const CARDSNUMBER: Number = BOARDCONFIG.cards_per_row * BOARDCONFIG.cards_per_col;
 
 // Color definitions for terminal output (ESC sequences)
 pub struct Colors;
