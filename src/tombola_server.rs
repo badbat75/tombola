@@ -3,14 +3,11 @@
 
 use std::sync::{Arc, Mutex};
 
-mod defs;
-use defs::{Number, FIRSTNUMBER, LASTNUMBER, NUMBERSPERCARD};
-mod board;
-use board::Board;
-mod terminal;
-mod server;
+use tombola::defs::{Number, NUMBERSPERCARD};
+use tombola::pouch::Pouch;
+use tombola::board::Board;
+use tombola::{terminal, server};
 
-#[derive(Copy, Clone)]
 enum IOList {
     Terminal,
 }
@@ -18,13 +15,13 @@ enum IOList {
 // Default program input/output:
 const IO: IOList = IOList::Terminal;
 
-fn next_extraction (iodevice: IOList) -> bool {
+fn next_extraction (iodevice: &IOList) -> bool {
     match iodevice {
         IOList::Terminal => { terminal::hitkey() }
     }
 }
 
-fn show_on(iodevice: IOList, board: &Board, pouch: &[Number]) {
+fn show_on(iodevice: &IOList, board: &Board, pouch: &[Number]) {
     match iodevice {
         IOList::Terminal => { terminal::show_on_terminal(board, pouch) }
     }
@@ -33,30 +30,48 @@ fn show_on(iodevice: IOList, board: &Board, pouch: &[Number]) {
 // Function to wait for a key press and return true if ESC is pressed, false otherwise
 #[tokio::main]
 async fn main() {
-    let mut pouch: Vec<Number> = (FIRSTNUMBER..=LASTNUMBER).collect();
+    // Initialize and fill the pouch
+    let pouch_ref = Arc::new(Mutex::new(Pouch::new()));
 
     // Create shared reference to the board (single source of truth)
     let board_ref = Arc::new(Mutex::new(Board::new()));
     
     // Start the API server in the background with the board reference
-    let (server_handle, shutdown_signal) = server::start_server(Arc::clone(&board_ref));
+    let (server_handle, shutdown_signal) = server::start_server(Arc::clone(&board_ref),Arc::clone(&pouch_ref));
 
-    while ! pouch.is_empty() {
-        // Expect event for next extraction
-        if next_extraction(IO) {
+    loop {
+        // Check if pouch is empty
+        let is_empty = if let Ok(pouch) = pouch_ref.lock() {
+            pouch.is_empty()
+        } else {
+            break; // Exit if we can't acquire the lock
+        };
+        
+        if is_empty {
             break;
         }
-        // Randomly extract a number index from the pouch
-        let random_index = rand::random_range(0..pouch.len());
-        let extracted: Number = pouch.remove(random_index);
         
+        // Expect event for next extraction
+        if next_extraction(&IO) {
+            break;
+        }
+        
+        // Randomly extract a number index from the pouch
+        let extracted: Number = if let Ok(mut pouch) = pouch_ref.lock() {
+            pouch.extract()
+        } else {
+            break; // Exit if we can't acquire the lock
+        };
+
         // Lock the shared board and perform all operations
         if let Ok(mut board) = board_ref.lock() {
             // Add the extracted number to the shared board and check for prizes
             board.push(extracted);
             
             // Show the current state on configured IO device
-            show_on(IO, &board, &pouch);
+            if let Ok(pouch) = pouch_ref.lock() {
+                show_on(&IO, &board, &pouch.numbers);
+            }
             
             // If the scorecard reaches the number of numbers per card, break the loop
             if board.get_scorecard() == NUMBERSPERCARD { break }

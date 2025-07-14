@@ -12,6 +12,7 @@ use serde_json::json;
 
 // Import Board from board module
 use crate::board::Board;
+use crate::pouch::Pouch;
 use crate::defs::Number;
 
 // Response structures for JSON serialization
@@ -26,12 +27,18 @@ struct ScorecardResponse {
 }
 
 #[derive(serde::Serialize)]
+struct PouchResponse {
+    pouch: Vec<Number>,
+    remaining: usize,
+}
+
+#[derive(serde::Serialize)]
 struct ErrorResponse {
     error: String,
 }
 
 // Start the HTTP server with Tokio
-pub fn start_server(board_ref: Arc<Mutex<Board>>) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>) {
+pub fn start_server(board_ref: Arc<Mutex<Board>>, pouch_ref: Arc<Mutex<Pouch>>) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>) {
     let shutdown_signal = Arc::new(AtomicBool::new(false));
     let shutdown_clone = Arc::clone(&shutdown_signal);
     
@@ -63,12 +70,13 @@ pub fn start_server(board_ref: Arc<Mutex<Board>>) -> (tokio::task::JoinHandle<()
             match accept_result {
                 Ok(Ok((stream, _))) => {
                     let board_clone = Arc::clone(&board_ref);
+                    let pouch_clone = Arc::clone(&pouch_ref);
                     let io = TokioIo::new(stream);
                     
                     // Spawn a task to handle the connection
                     tokio::spawn(async move {
                         let service = service_fn(move |req| {
-                            handle_request(req, Arc::clone(&board_clone))
+                            handle_request(req, Arc::clone(&board_clone), Arc::clone(&pouch_clone))
                         });
                         
                         if let Err(err) = http1::Builder::new()
@@ -99,11 +107,23 @@ pub fn start_server(board_ref: Arc<Mutex<Board>>) -> (tokio::task::JoinHandle<()
 async fn handle_request(
     req: Request<hyper::body::Incoming>,
     board_ref: Arc<Mutex<Board>>,
+    pouch_ref: Arc<Mutex<Pouch>>,
 ) -> Result<Response<Full<Bytes>>, Infallible> {
     let response = match (req.method(), req.uri().path()) {
         (&Method::GET, "/board") => {
             let numbers = get_numbers_from_board(&board_ref);
             let response = BoardResponse { board: numbers };
+            let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "application/json")
+                .header("Access-Control-Allow-Origin", "*")
+                .body(Full::new(Bytes::from(body)))
+                .unwrap()
+        }
+        (&Method::GET, "/pouch") => {
+            let (pouch_numbers, remaining) = get_pouch_info(&pouch_ref);
+            let response = PouchResponse { pouch: pouch_numbers, remaining };
             let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
             Response::builder()
                 .status(StatusCode::OK)
@@ -181,5 +201,14 @@ fn get_scorecard_from_board(board_ref: &Arc<Mutex<Board>>) -> Number {
         board.get_scorecard()
     } else {
         0
+    }
+}
+
+// Function to get pouch information
+fn get_pouch_info(pouch_ref: &Arc<Mutex<Pouch>>) -> (Vec<Number>, usize) {
+    if let Ok(pouch) = pouch_ref.lock() {
+        (pouch.numbers.clone(), pouch.len())
+    } else {
+        (Vec::new(), 0)
     }
 }

@@ -11,8 +11,17 @@ repository = "https://github.com/badbat75/tombola"
 rand = "0"
 crossterm = "*"
 tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.11", features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
 http-body-util = "0.1"
+
+[[bin]]
+name = "tombola"
+path = "src/tombola_server.rs"
+
+[[bin]]
+name = "tombola_client"
+path = "src/terminal_client.rs"

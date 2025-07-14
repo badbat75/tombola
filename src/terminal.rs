@@ -104,9 +104,7 @@ pub fn show_on_terminal(
         _ => {}
     }
 
-    if pouch.is_empty() { 
-        println!("\nThe pouch is empty!"); 
-    } else {
+    if ! pouch.is_empty() { 
         println!("\nRemaining in pouch {}:", pouch.len());
         for &pouch_num in pouch {
             print!("{pouch_num:2} ");
