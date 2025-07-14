@@ -335,7 +335,6 @@ async fn handle_register(
     // Check if client already exists and return existing info
     if let Ok(mut registry) = client_registry.lock() {
         if let Some(existing_client) = registry.get(&register_request.name) {
-            println!("🔄 Client already registered: {} (ID: {})", register_request.name, existing_client.id);
             let register_response = RegisterResponse {
                 client_id: existing_client.id.clone(),
                 message: format!("Client '{}' already registered", register_request.name),
@@ -362,12 +361,12 @@ async fn handle_register(
     }
 
     // Check if client requested cards during registration
-    if register_request.nocard.is_some() {
-        println!("🎴 Generating 1 card for client '{}' during registration", register_request.name);
+    if let Some(card_count) = register_request.nocard {
+        println!("🎴 Generating {} cards for client '{}' during registration", card_count, register_request.name);
         
-        // Generate exactly 1 card using the card generator
+        // Generate the requested number of cards using the card generator
         let generator = TombolaGenerator::new();
-        let cards = generator.generate_cards(1);
+        let cards = generator.generate_cards(card_count as usize);
         
         // Store the cards in the registries
         if let (Ok(mut assignments), Ok(mut client_cards_map)) = (card_assignments.lock(), client_cards.lock()) {
@@ -389,7 +388,7 @@ async fn handle_register(
             // Store card IDs for this client
             client_cards_map.insert(client_id.clone(), card_ids_for_client);
             
-            println!("✅ Generated and assigned 1 card to client '{}'", register_request.name);
+            println!("✅ Generated and assigned {} cards to client '{}'", card_count, register_request.name);
         } else {
             println!("⚠️  Failed to acquire card registry locks for client '{}'", register_request.name);
         }
