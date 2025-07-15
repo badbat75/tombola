@@ -37,7 +37,7 @@ async fn main() {
     let board_ref = Arc::new(Mutex::new(Board::new()));
     
     // Start the API server in the background with the board reference
-    let (server_handle, shutdown_signal) = server::start_server(Arc::clone(&board_ref),Arc::clone(&pouch_ref));
+    let (server_handle, shutdown_signal, card_manager) = server::start_server(Arc::clone(&board_ref),Arc::clone(&pouch_ref));
 
     loop {
         // Check if pouch is empty
@@ -67,7 +67,39 @@ async fn main() {
         if let Ok(mut board) = board_ref.lock() {
             // Add the extracted number to the shared board and check for prizes
             board.push(extracted);
+
+            ////////////////////////////////////////////////////////////
+
+            // Calculate score and numbers to mark
+            let (new_score, numbers_to_mark) = board.get_scorecard_ref().board_calculate_score(&board.get_numbers());
+            // Update the scorecard score
+            board.update_scorecard(new_score);
             
+            // Update marked numbers based on scoring
+            board.update_marked_numbers(numbers_to_mark);
+
+            ////////////////////////////////////////////////////////////
+
+            // Calculate scores for all cards
+            if let Ok(card_assignments_map) = card_manager.lock() {
+                let assignments = card_assignments_map.get_all_assignments();
+                
+                let all_card_scores = board.get_scorecard_ref().allcards_calculate_score(
+                    &board.get_numbers(), 
+                    assignments
+                );
+                
+                if !all_card_scores.is_empty() {
+                    println!("\n🎯 All Card Scores:");
+                    for (card_id, score, marked_numbers) in all_card_scores {
+                        println!("  Card {}: Score = {}, Marked = {:?}", card_id, score, marked_numbers);
+                    }
+                    println!();
+                }
+            }
+
+            ////////////////////////////////////////////////////////////
+
             // Show the current state on configured IO device
             if let Ok(pouch) = pouch_ref.lock() {
                 show_on(&IO, &board, &pouch.numbers);

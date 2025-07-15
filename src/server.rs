@@ -15,8 +15,8 @@ use serde_json::json;
 use crate::board::Board;
 use crate::pouch::Pouch;
 use crate::defs::Number;
-use crate::client::{RegisterRequest, RegisterResponse, ClientInfoResponse, ClientInfo, ClientRegistry, CardAssignments, ClientCards, generate_client_id};
-use crate::card::{CardManagement, GenerateCardsRequest, GenerateCardsResponse, CardInfo, ListAssignedCardsResponse, AssignedCardInfo};
+use crate::client::{RegisterRequest, RegisterResponse, ClientInfoResponse, ClientInfo, ClientRegistry, generate_client_id};
+use crate::card::{CardAssignmentManager, GenerateCardsRequest, GenerateCardsResponse, CardInfo, ListAssignedCardsResponse, AssignedCardInfo};
 
 // Response structures for JSON serialization
 #[derive(serde::Serialize)]
@@ -41,12 +41,13 @@ struct ErrorResponse {
 }
 
 // Start the HTTP server with Tokio
-pub fn start_server(board_ref: Arc<Mutex<Board>>, pouch_ref: Arc<Mutex<Pouch>>) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>) {
+pub fn start_server(board_ref: Arc<Mutex<Board>>, pouch_ref: Arc<Mutex<Pouch>>) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>, Arc<Mutex<CardAssignmentManager>>) {
     let shutdown_signal = Arc::new(AtomicBool::new(false));
     let shutdown_clone = Arc::clone(&shutdown_signal);
     let client_registry: ClientRegistry = Arc::new(Mutex::new(HashMap::new()));
-    let card_assignments: CardAssignments = Arc::new(Mutex::new(HashMap::new()));
-    let client_cards: ClientCards = Arc::new(Mutex::new(HashMap::new()));
+    let card_manager: Arc<Mutex<CardAssignmentManager>> = Arc::new(Mutex::new(CardAssignmentManager::new()));
+    
+    let card_manager_clone = Arc::clone(&card_manager);
     
     let handle = tokio::spawn(async move {
         let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
@@ -78,14 +79,13 @@ pub fn start_server(board_ref: Arc<Mutex<Board>>, pouch_ref: Arc<Mutex<Pouch>>) 
                     let board_clone = Arc::clone(&board_ref);
                     let pouch_clone = Arc::clone(&pouch_ref);
                     let registry_clone = Arc::clone(&client_registry);
-                    let cards_clone = Arc::clone(&card_assignments);
-                    let client_cards_clone = Arc::clone(&client_cards);
+                    let card_manager_clone = Arc::clone(&card_manager);
                     let io = TokioIo::new(stream);
                     
                     // Spawn a task to handle the connection
                     tokio::spawn(async move {
                         let service = service_fn(move |req| {
-                            handle_request(req, Arc::clone(&board_clone), Arc::clone(&pouch_clone), Arc::clone(&registry_clone), Arc::clone(&cards_clone), Arc::clone(&client_cards_clone))
+                            handle_request(req, Arc::clone(&board_clone), Arc::clone(&pouch_clone), registry_clone.clone(), Arc::clone(&card_manager_clone))
                         });
                         
                         if let Err(err) = http1::Builder::new()
@@ -108,7 +108,7 @@ pub fn start_server(board_ref: Arc<Mutex<Board>>, pouch_ref: Arc<Mutex<Pouch>>) 
         println!("API Server shutting down...");
     });
 
-    (handle, shutdown_signal)
+    (handle, shutdown_signal, card_manager_clone)
 }
 
 // Handle HTTP requests asynchronously
@@ -117,26 +117,25 @@ async fn handle_request(
     board_ref: Arc<Mutex<Board>>,
     pouch_ref: Arc<Mutex<Pouch>>,
     client_registry: ClientRegistry,
-    card_assignments: CardAssignments,
-    client_cards: ClientCards,
+    card_manager: Arc<Mutex<CardAssignmentManager>>,
 ) -> Result<Response<Full<Bytes>>, Infallible> {
     let response = match (req.method(), req.uri().path()) {
         (&Method::POST, "/register") => {
-            handle_register(req, client_registry, card_assignments, client_cards).await
+            handle_register(req, client_registry, card_manager).await
         }
         (&Method::GET, path) if path.starts_with("/client/") => {
             let client_name = &path[8..]; // Remove "/client/" prefix
             handle_client_info(client_name, client_registry).await
         }
         (&Method::POST, "/generatecardsforme") => {
-            handle_generate_cards(req, client_registry, card_assignments, client_cards).await
+            handle_generate_cards(req, client_registry, card_manager).await
         }
         (&Method::GET, "/listassignedcards") => {
-            handle_list_assigned_cards(req, client_registry, client_cards).await
+            handle_list_assigned_cards(req, client_registry, card_manager).await
         }
         (&Method::GET, path) if path.starts_with("/getassignedcard/") => {
             let card_id = path[17..].to_string(); // Remove "/getassignedcard/" prefix
-            handle_get_assigned_card(req, client_registry, card_assignments, card_id).await
+            handle_get_assigned_card(req, client_registry, card_manager, card_id).await
         }
         (&Method::GET, "/board") => {
             handle_board(board_ref).await
@@ -162,8 +161,7 @@ async fn handle_request(
 async fn handle_register(
     req: Request<hyper::body::Incoming>,
     client_registry: ClientRegistry,
-    card_assignments: CardAssignments,
-    client_cards: ClientCards,
+    card_manager: Arc<Mutex<CardAssignmentManager>>,
 ) -> Response<Full<Bytes>> {
     // Read the request body
     let body = match req.collect().await {
@@ -234,23 +232,12 @@ async fn handle_register(
     let card_count = register_request.nocard.unwrap_or(1);
     println!("🎴 Generating {} cards for client '{}' during registration", card_count, register_request.name);
     
-    // Generate the requested number of cards using the card management
-    let generator = CardManagement::new();
-    let (_, client_card_ids, assignments) = generator.generate_and_assign_cards(card_count, client_id.clone());
-    
-    // Store the cards in the registries
-    if let (Ok(mut assignments_map), Ok(mut client_cards_map)) = (card_assignments.lock(), client_cards.lock()) {
-        // Store assignments
-        for assignment in assignments {
-            assignments_map.insert(assignment.card_id.clone(), assignment);
-        }
-        
-        // Store card IDs for this client
-        client_cards_map.insert(client_id.clone(), client_card_ids);
-        
+    // Generate the requested number of cards using the card manager
+    if let Ok(mut manager) = card_manager.lock() {
+        manager.assign_cards(client_id.clone(), card_count);
         println!("✅ Generated and assigned {} cards to client '{}'", card_count, register_request.name);
     } else {
-        println!("⚠️  Failed to acquire card registry locks for client '{}'", register_request.name);
+        println!("⚠️  Failed to acquire card manager lock for client '{}'", register_request.name);
     }
 
     // Create response
@@ -345,8 +332,7 @@ async fn handle_client_info(
 async fn handle_generate_cards(
     req: Request<hyper::body::Incoming>,
     client_registry: ClientRegistry,
-    card_assignments: CardAssignments,
-    client_cards: ClientCards,
+    card_manager: Arc<Mutex<CardAssignmentManager>>,
 ) -> Response<Full<Bytes>> {
     // Get client ID from headers
     let client_id = match req.headers().get("X-Client-ID") {
@@ -436,8 +422,8 @@ async fn handle_generate_cards(
     }
 
     // Check if client already has cards assigned (prevent duplicate generation)
-    if let Ok(client_cards_map) = client_cards.lock() {
-        if let Some(existing_cards) = client_cards_map.get(&client_id) {
+    if let Ok(manager) = card_manager.lock() {
+        if let Some(existing_cards) = manager.get_client_cards(&client_id) {
             if !existing_cards.is_empty() {
                 let error_response = ErrorResponse {
                     error: "Client already has cards assigned. Card generation is only allowed during registration.".to_string(),
@@ -453,20 +439,22 @@ async fn handle_generate_cards(
         }
     }
 
-    // Generate cards using the CardManagement
-    let generator = CardManagement::new();
-    let (card_infos, client_card_ids, assignments) = generator.generate_and_assign_cards(generate_request.count, client_id.clone());
-
-    // Store card assignments in the registries
-    if let (Ok(mut assignments_map), Ok(mut client_cards_map)) = (card_assignments.lock(), client_cards.lock()) {
-        let client_card_list = client_cards_map.entry(client_id.clone()).or_insert_with(Vec::new);
-        
-        // Store assignments and update client card list
-        for assignment in assignments {
-            assignments_map.insert(assignment.card_id.clone(), assignment);
-        }
-        client_card_list.extend(client_card_ids);
-    }
+    // Generate cards using the CardAssignmentManager
+    let card_infos = if let Ok(mut manager) = card_manager.lock() {
+        let (cards, _) = manager.assign_cards(client_id.clone(), generate_request.count);
+        cards
+    } else {
+        let error_response = ErrorResponse {
+            error: "Failed to acquire card manager lock".to_string(),
+        };
+        let body = serde_json::to_string(&error_response).unwrap_or_else(|_| "{}".to_string());
+        return Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .header("Content-Type", "application/json")
+            .header("Access-Control-Allow-Origin", "*")
+            .body(Full::new(Bytes::from(body)))
+            .unwrap();
+    };
 
     println!("✅ Generated {} cards for client {}", card_infos.len(), client_id);
 
@@ -489,7 +477,7 @@ async fn handle_generate_cards(
 async fn handle_list_assigned_cards(
     req: Request<hyper::body::Incoming>,
     client_registry: ClientRegistry,
-    client_cards: ClientCards,
+    card_manager: Arc<Mutex<CardAssignmentManager>>,
 ) -> Response<Full<Bytes>> {
     // Get client ID from headers
     let client_id = match req.headers().get("X-Client-ID") {
@@ -545,8 +533,8 @@ async fn handle_list_assigned_cards(
     }
 
     // Get client's assigned cards
-    let assigned_cards = if let Ok(client_cards_map) = client_cards.lock() {
-        client_cards_map.get(&client_id).cloned().unwrap_or_default()
+    let assigned_cards = if let Ok(manager) = card_manager.lock() {
+        manager.get_client_cards(&client_id).cloned().unwrap_or_default()
     } else {
         Vec::new()
     };
@@ -576,7 +564,7 @@ async fn handle_list_assigned_cards(
 async fn handle_get_assigned_card(
     req: Request<hyper::body::Incoming>,
     client_registry: ClientRegistry,
-    card_assignments: CardAssignments,
+    card_manager: Arc<Mutex<CardAssignmentManager>>,
     card_id: String,
 ) -> Response<Full<Bytes>> {
     // Get client ID from headers
@@ -633,8 +621,8 @@ async fn handle_get_assigned_card(
     }
 
     // Get the card assignment
-    let card_assignment = if let Ok(assignments) = card_assignments.lock() {
-        assignments.get(&card_id).cloned()
+    let card_assignment = if let Ok(manager) = card_manager.lock() {
+        manager.get_card_assignment(&card_id).cloned()
     } else {
         None
     };

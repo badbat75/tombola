@@ -24,6 +24,78 @@ impl ScoreCard {
         ScoreCard { scorecard: score }
     }
 
+    pub fn allcards_calculate_score(&self, board_numbers: &[Number], card_assignments: &std::collections::HashMap<String, crate::card::CardAssignment>) -> Vec<(String, Number, Vec<Number>)> {
+        let mut card_scores = Vec::new();
+        let current_scorecard = self.scorecard; // Get the current scorecard value
+        
+        // Iterate through all card assignments
+        for (card_id, assignment) in card_assignments {
+            // Extract all numbers from the card
+            let mut card_numbers = Vec::new();
+            for row in &assignment.card_data {
+                for cell in row {
+                    if let Some(number) = cell {
+                        card_numbers.push(*number);
+                    }
+                }
+            }
+            
+            // Calculate how many card numbers have been extracted
+            let mut extracted_card_numbers = Vec::new();
+            for &card_number in &card_numbers {
+                if board_numbers.contains(&card_number) {
+                    extracted_card_numbers.push(card_number);
+                }
+            }
+            
+            // Calculate the score for this specific card
+            let card_score = if extracted_card_numbers.len() == card_numbers.len() && !card_numbers.is_empty() {
+                // Full card (BINGO)
+                NUMBERSPERCARD
+            } else if !extracted_card_numbers.is_empty() {
+                // Check for line completions within this card
+                let mut max_line_score = 0;
+                
+                // Check each row in the card (3 rows)
+                for row_index in 0..3 {
+                    let row = &assignment.card_data[row_index];
+                    let mut row_extracted_count = 0;
+                    
+                    for cell in row {
+                        if let Some(number) = cell {
+                            if board_numbers.contains(number) {
+                                row_extracted_count += 1;
+                            }
+                        }
+                    }
+                    
+                    // Update max line score if this row has more extracted numbers
+                    if row_extracted_count > max_line_score {
+                        max_line_score = row_extracted_count;
+                    }
+                }
+                
+                // Return the highest line score (2, 3, 4, or 5)
+                if max_line_score >= 2 {
+                    max_line_score
+                } else {
+                    0
+                }
+            } else {
+                0
+            };
+            
+            // Only include cards that have achieved a score greater than the current scorecard
+            // This prevents showing "old" achievements that have already been surpassed
+            if card_score > current_scorecard {
+                // Store the result: (card_id, score, numbers_to_mark)
+                card_scores.push((card_id.clone(), card_score, extracted_card_numbers));
+            }
+        }
+        
+        card_scores
+    }
+
     pub fn board_calculate_score(&self, board_numbers: &[Number]) -> (Number, Vec<Number>) {
         // Calculate score based on the last extracted number
         if let Some(&last_number) = board_numbers.last() {

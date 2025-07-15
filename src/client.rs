@@ -1,9 +1,8 @@
-use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
+use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
-use crate::card::CardAssignment;
 
 // Client registration structures
 #[derive(Debug, Deserialize)]
@@ -38,12 +37,6 @@ pub struct ClientInfo {
 
 // Global client registry (keyed by client name)
 pub type ClientRegistry = Arc<Mutex<HashMap<String, ClientInfo>>>;
-
-// Global card assignments registry (keyed by card_id)
-pub type CardAssignments = Arc<Mutex<HashMap<String, CardAssignment>>>;
-
-// Client cards registry (keyed by client_id, contains list of card_ids)
-pub type ClientCards = Arc<Mutex<HashMap<String, Vec<String>>>>;
 
 // Client ID generation function
 pub fn generate_client_id(name: &str, client_type: &str) -> String {

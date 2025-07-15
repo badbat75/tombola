@@ -2,6 +2,7 @@ use crate::defs::{Number, FIRSTNUMBER, LASTNUMBER, CARDSNUMBER, BOARDCONFIG};
 
 use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::Hasher;
 use rand::seq::SliceRandom;
 use rand::rng;
@@ -488,5 +489,69 @@ impl CardManagement {
         }
         
         (card_infos, client_card_ids, assignments)
+    }
+}
+
+// Card assignment manager - handles all card assignment logic
+#[derive(Debug, Clone)]
+pub struct CardAssignmentManager {
+    assignments: HashMap<String, CardAssignment>,
+    client_cards: HashMap<String, Vec<String>>,
+}
+
+impl CardAssignmentManager {
+    pub fn new() -> Self {
+        Self {
+            assignments: HashMap::new(),
+            client_cards: HashMap::new(),
+        }
+    }
+
+    pub fn assign_cards(&mut self, client_id: String, count: u32) -> (Vec<CardInfo>, Vec<String>) {
+        let card_management = CardManagement::new();
+        let (card_infos, client_card_ids, assignments) = card_management.generate_and_assign_cards(count, client_id.clone());
+        
+        // Store assignments
+        for assignment in assignments {
+            self.assignments.insert(assignment.card_id.clone(), assignment);
+        }
+        
+        // Store client's card IDs
+        self.client_cards.insert(client_id, client_card_ids.clone());
+        
+        (card_infos, client_card_ids)
+    }
+
+    pub fn get_client_cards(&self, client_id: &str) -> Option<&Vec<String>> {
+        self.client_cards.get(client_id)
+    }
+
+    pub fn get_card_assignment(&self, card_id: &str) -> Option<&CardAssignment> {
+        self.assignments.get(card_id)
+    }
+
+    pub fn get_all_assignments(&self) -> &HashMap<String, CardAssignment> {
+        &self.assignments
+    }
+
+    pub fn client_owns_card(&self, client_id: &str, card_id: &str) -> bool {
+        if let Some(assignment) = self.assignments.get(card_id) {
+            assignment.client_id == client_id
+        } else {
+            false
+        }
+    }
+
+    pub fn get_client_assigned_cards(&self, client_id: &str) -> Vec<AssignedCardInfo> {
+        self.client_cards.get(client_id)
+            .map(|card_ids| {
+                card_ids.iter().map(|card_id| {
+                    AssignedCardInfo {
+                        card_id: card_id.clone(),
+                        assigned_to: client_id.to_string(),
+                    }
+                }).collect()
+            })
+            .unwrap_or_default()
     }
 }

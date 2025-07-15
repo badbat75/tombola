@@ -24,18 +24,23 @@ impl Board {
     
     pub fn push(&mut self, entry: Number) {
         self.numbers.push(entry);
-        let (new_score, numbers_to_mark) = self.scorecard.board_calculate_score(&self.numbers);
-        
-        // Update the scorecard score
-        self.scorecard = ScoreCard::with_score(new_score);
-        
-        // Update marked numbers based on scoring
+    }
+    
+    pub fn update_scorecard(&mut self, score: Number) {
+        self.scorecard = ScoreCard::with_score(score);
+    }
+    
+    pub fn update_marked_numbers(&mut self, numbers_to_mark: Vec<Number>) {
         if !numbers_to_mark.is_empty() {
             self.marked_numbers.clear();
             for number in numbers_to_mark {
                 self.marked_numbers.insert(number);
             }
         }
+    }
+    
+    pub fn get_scorecard_ref(&self) -> &ScoreCard {
+        &self.scorecard
     }
     
     pub fn get_numbers(&self) -> &Vec<Number> {
