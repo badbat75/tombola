@@ -230,28 +230,27 @@ async fn handle_register(
         println!("✅ Client registered: {} (ID: {})", register_request.name, client_id);
     }
 
-    // Check if client requested cards during registration
-    if let Some(card_count) = register_request.nocard {
-        println!("🎴 Generating {} cards for client '{}' during registration", card_count, register_request.name);
-        
-        // Generate the requested number of cards using the card management
-        let generator = CardManagement::new();
-        let (_, client_card_ids, assignments) = generator.generate_and_assign_cards(card_count, client_id.clone());
-        
-        // Store the cards in the registries
-        if let (Ok(mut assignments_map), Ok(mut client_cards_map)) = (card_assignments.lock(), client_cards.lock()) {
-            // Store assignments
-            for assignment in assignments {
-                assignments_map.insert(assignment.card_id.clone(), assignment);
-            }
-            
-            // Store card IDs for this client
-            client_cards_map.insert(client_id.clone(), client_card_ids);
-            
-            println!("✅ Generated and assigned {} cards to client '{}'", card_count, register_request.name);
-        } else {
-            println!("⚠️  Failed to acquire card registry locks for client '{}'", register_request.name);
+    // Check if client requested cards during registration, default to 1 if not specified
+    let card_count = register_request.nocard.unwrap_or(1);
+    println!("🎴 Generating {} cards for client '{}' during registration", card_count, register_request.name);
+    
+    // Generate the requested number of cards using the card management
+    let generator = CardManagement::new();
+    let (_, client_card_ids, assignments) = generator.generate_and_assign_cards(card_count, client_id.clone());
+    
+    // Store the cards in the registries
+    if let (Ok(mut assignments_map), Ok(mut client_cards_map)) = (card_assignments.lock(), client_cards.lock()) {
+        // Store assignments
+        for assignment in assignments {
+            assignments_map.insert(assignment.card_id.clone(), assignment);
         }
+        
+        // Store card IDs for this client
+        client_cards_map.insert(client_id.clone(), client_card_ids);
+        
+        println!("✅ Generated and assigned {} cards to client '{}'", card_count, register_request.name);
+    } else {
+        println!("⚠️  Failed to acquire card registry locks for client '{}'", register_request.name);
     }
 
     // Create response

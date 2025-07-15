@@ -1,6 +1,7 @@
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
+use chrono;
 
 // Client registration request
 #[derive(Debug, Serialize)]
@@ -388,113 +389,139 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(()) => {
             println!("✅ Client registered successfully!");
             
-            // Get and display all assigned cards
-            match client.list_assigned_cards().await {
-                Ok(response) => {
-                    if response.cards.is_empty() {
-                        println!("No cards assigned to this client.");
-                    } else {
-                        println!("\n📇 Your Cards ({} total):", response.cards.len());
-                        
-                        // Get the current board (extracted numbers) from the server
-                        let extracted_numbers = match client.get_board().await {
-                            Ok(board) => {
-                                if !board.is_empty() {
-                                    println!("🎯 Extracted numbers: {:?}", board);
-                                    println!("💡 Numbers highlighted in \x1b[1;33myellow\x1b[0m have been extracted from the pouch");
-                                }
-                                board
-                            },
-                            Err(e) => {
-                                println!("⚠️  Warning: Failed to get board state: {}", e);
-                                Vec::new()
+            // Get assigned cards info once
+            let assigned_cards = match client.list_assigned_cards().await {
+                Ok(response) => response.cards,
+                Err(e) => {
+                    println!("❌ Failed to list assigned cards: {}", e);
+                    std::process::exit(1);
+                }
+            };
+            
+            if assigned_cards.is_empty() {
+                println!("No cards assigned to this client.");
+                return Ok(());
+            }
+            
+            println!("\n� Starting live monitoring (updating every 2 seconds)...");
+            println!("�📇 Your Cards ({} total)", assigned_cards.len());
+            println!("💡 Numbers highlighted in \x1b[1;33myellow\x1b[0m have been extracted from the pouch");
+            println!("🛑 Press Ctrl+C to stop monitoring\n");
+            
+            // Main monitoring loop
+            loop {
+                // Clear screen for better readability
+                print!("\x1b[2J\x1b[1;1H");
+                
+                // Show timestamp
+                println!("🕐 Last update: {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"));
+                
+                // Get the current board (extracted numbers) from the server
+                let extracted_numbers = match client.get_board().await {
+                    Ok(board) => {
+                        if !board.is_empty() {
+                            println!("🎯 Extracted numbers ({}): {:?}", board.len(), board);
+                        } else {
+                            println!("🎯 No numbers extracted yet");
+                        }
+                        board
+                    },
+                    Err(e) => {
+                        println!("⚠️  Warning: Failed to get board state: {}", e);
+                        Vec::new()
+                    }
+                };
+                
+                // Get the current scorecard from the server
+                let scorecard = match client.get_scorecard().await {
+                    Ok(scorecard) => {
+                        if scorecard > 0 {
+                            println!("📊 Current scorecard: {} (achievements shown only if scorecard < achievement level)", scorecard);
+                        } else {
+                            println!("📊 No scorecard yet");
+                        }
+                        scorecard
+                    },
+                    Err(e) => {
+                        println!("⚠️  Warning: Failed to get scorecard: {}", e);
+                        0 // Default to 0 if we can't get scorecard
+                    }
+                };
+                
+                println!("\n📇 Your Cards ({} total):", assigned_cards.len());
+                
+                let mut bingo_cards = Vec::new();
+                let mut line_achievements = Vec::new();
+                
+                for (index, card) in assigned_cards.iter().enumerate() {
+                    match client.get_assigned_card(&card.card_id).await {
+                        Ok(card_info) => {
+                            let (is_bingo, card_lines) = print_card_as_table_with_highlights(index + 1, &card_info.card_id, &card_info.card_data, &extracted_numbers, scorecard);
+                            if is_bingo {
+                                bingo_cards.push(card_info.card_id.clone());
                             }
-                        };
-                        
-                        // Get the current scorecard from the server
-                        let scorecard = match client.get_scorecard().await {
-                            Ok(scorecard) => {
-                                println!("📊 Current scorecard: {} (achievements shown only if scorecard < achievement level)", scorecard);
-                                scorecard
-                            },
-                            Err(e) => {
-                                println!("⚠️  Warning: Failed to get scorecard: {}", e);
-                                0 // Default to 0 if we can't get scorecard
-                            }
-                        };
-                        
-                        let mut bingo_cards = Vec::new();
-                        let mut line_achievements = Vec::new();
-                        
-                        for (index, card) in response.cards.iter().enumerate() {
-                            match client.get_assigned_card(&card.card_id).await {
-                                Ok(card_info) => {
-                                    let (is_bingo, card_lines) = print_card_as_table_with_highlights(index + 1, &card_info.card_id, &card_info.card_data, &extracted_numbers, scorecard);
-                                    if is_bingo {
-                                        bingo_cards.push(card_info.card_id.clone());
-                                    }
-                                    if !card_lines.is_empty() {
-                                        line_achievements.push((card_info.card_id.clone(), card_lines));
-                                    }
-                                }
-                                Err(e) => {
-                                    println!("   ❌ Failed to get card {} details: {}", index + 1, e);
-                                }
+                            if !card_lines.is_empty() {
+                                line_achievements.push((card_info.card_id.clone(), card_lines));
                             }
                         }
-                        
-                        // Show BINGO summary if any cards have BINGO
-                        if !bingo_cards.is_empty() {
-                            println!("\n🏆 \x1b[1;32mCONGRATULATIONS! You have {} BINGO card(s)!\x1b[0m 🏆", bingo_cards.len());
-                            for card_id in bingo_cards {
-                                println!("   🎉 BINGO with Card ID: {}", card_id);
-                            }
-                        }
-                        
-                        // Show line achievements summary
-                        if !line_achievements.is_empty() {
-                            println!("\n📋 Line Achievements Summary:");
-                            let mut total_lines = 0;
-                            let mut five_in_line = 0;
-                            let mut four_in_line = 0;
-                            let mut three_in_line = 0;
-                            let mut two_in_line = 0;
-                            
-                            for (card_id, lines) in &line_achievements {
-                                println!("   Card {}: {} achievement(s)", card_id, lines.len());
-                                for line in lines {
-                                    println!("      • {}", line);
-                                    total_lines += 1;
-                                    if line.contains("5 in line") {
-                                        five_in_line += 1;
-                                    } else if line.contains("4 in line") {
-                                        four_in_line += 1;
-                                    } else if line.contains("3 in line") {
-                                        three_in_line += 1;
-                                    } else if line.contains("2 in line") {
-                                        two_in_line += 1;
-                                    }
-                                }
-                            }
-                            
-                            println!("\n📊 Total Line Statistics:");
-                            if five_in_line > 0 {
-                                println!("   🎯 5 in line: {}", five_in_line);
-                            }
-                            if four_in_line > 0 {
-                                println!("   🎪 4 in line: {}", four_in_line);
-                            }
-                            if three_in_line > 0 {
-                                println!("   🎭 3 in line: {}", three_in_line);
-                            }
-                            if two_in_line > 0 {
-                                println!("   🎨 2 in line: {}", two_in_line);
-                            }
-                            println!("   📈 Total achievements: {}", total_lines);
+                        Err(e) => {
+                            println!("   ❌ Failed to get card {} details: {}", index + 1, e);
                         }
                     }
                 }
-                Err(e) => println!("❌ Failed to list assigned cards: {}", e),
+                
+                // Show BINGO summary if any cards have BINGO
+                if !bingo_cards.is_empty() {
+                    println!("\n🏆 \x1b[1;32mCONGRATULATIONS! You have {} BINGO card(s)!\x1b[0m 🏆", bingo_cards.len());
+                    for card_id in bingo_cards {
+                        println!("   🎉 BINGO with Card ID: {}", card_id);
+                    }
+                }
+                
+                // Show line achievements summary
+                if !line_achievements.is_empty() {
+                    println!("\n📋 Line Achievements Summary:");
+                    let mut total_lines = 0;
+                    let mut five_in_line = 0;
+                    let mut four_in_line = 0;
+                    let mut three_in_line = 0;
+                    let mut two_in_line = 0;
+                    
+                    for (card_id, lines) in &line_achievements {
+                        println!("   Card {}: {} achievement(s)", card_id, lines.len());
+                        for line in lines {
+                            println!("      • {}", line);
+                            total_lines += 1;
+                            if line.contains("5 in line") {
+                                five_in_line += 1;
+                            } else if line.contains("4 in line") {
+                                four_in_line += 1;
+                            } else if line.contains("3 in line") {
+                                three_in_line += 1;
+                            } else if line.contains("2 in line") {
+                                two_in_line += 1;
+                            }
+                        }
+                    }
+                    
+                    println!("\n📊 Total Line Statistics:");
+                    if five_in_line > 0 {
+                        println!("   🎯 5 in line: {}", five_in_line);
+                    }
+                    if four_in_line > 0 {
+                        println!("   🎪 4 in line: {}", four_in_line);
+                    }
+                    if three_in_line > 0 {
+                        println!("   🎭 3 in line: {}", three_in_line);
+                    }
+                    if two_in_line > 0 {
+                        println!("   🎨 2 in line: {}", two_in_line);
+                    }
+                    println!("   📈 Total achievements: {}", total_lines);
+                }
+                
+                // Wait for 2 seconds before next update
+                sleep(Duration::from_secs(2)).await;
             }
         }
         Err(e) => {
