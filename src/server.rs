@@ -3,8 +3,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::Hasher;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{body::Bytes, Request, Response, StatusCode, Method};
@@ -12,13 +10,13 @@ use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 use http_body_util::{Full, BodyExt};
 use serde_json::json;
-use serde::{Deserialize, Serialize};
 
 // Import Board from board module
 use crate::board::Board;
 use crate::pouch::Pouch;
 use crate::defs::Number;
-use crate::card::{TombolaGenerator, Card};
+use crate::client::{RegisterRequest, RegisterResponse, ClientInfoResponse, ClientInfo, ClientRegistry, CardAssignments, ClientCards, generate_client_id};
+use crate::card::{CardManagement, GenerateCardsRequest, GenerateCardsResponse, CardInfo, ListAssignedCardsResponse, AssignedCardInfo};
 
 // Response structures for JSON serialization
 #[derive(serde::Serialize)]
@@ -41,87 +39,6 @@ struct PouchResponse {
 struct ErrorResponse {
     error: String,
 }
-
-// Client registration structures
-#[derive(Debug, Deserialize)]
-struct RegisterRequest {
-    name: String,
-    client_type: String,
-    nocard: Option<u32>,  // Number of cards to generate during registration
-}
-
-#[derive(Debug, Serialize)]
-struct RegisterResponse {
-    client_id: String,
-    message: String,
-}
-
-#[derive(Debug, Serialize)]
-struct ClientInfoResponse {
-    client_id: String,
-    name: String,
-    client_type: String,
-    registered_at: String,
-}
-
-// Card generation request
-#[derive(Debug, Deserialize)]
-struct GenerateCardsRequest {
-    count: u32,
-}
-
-// Card generation response
-#[derive(Debug, Serialize)]
-struct GenerateCardsResponse {
-    cards: Vec<CardInfo>,
-    message: String,
-}
-
-// Card info for responses
-#[derive(Debug, Serialize)]
-struct CardInfo {
-    card_id: String,
-    card_data: Vec<Vec<Option<u8>>>, // Changed to Option<u8> to match Card structure
-}
-
-// List assigned cards response
-#[derive(Debug, Serialize)]
-struct ListAssignedCardsResponse {
-    cards: Vec<AssignedCardInfo>,
-}
-
-// Assigned card info
-#[derive(Debug, Serialize)]
-struct AssignedCardInfo {
-    card_id: String,
-    assigned_to: String,
-}
-
-// Client information storage
-#[derive(Debug, Clone)]
-struct ClientInfo {
-    id: String,
-    name: String,
-    client_type: String,
-    registered_at: std::time::SystemTime,
-}
-
-// Card assignment storage
-#[derive(Debug, Clone)]
-struct CardAssignment {
-    card_id: String,
-    client_id: String,
-    card_data: Card,
-}
-
-// Global client registry (keyed by client name)
-type ClientRegistry = Arc<Mutex<HashMap<String, ClientInfo>>>;
-
-// Global card assignments registry (keyed by card_id)
-type CardAssignments = Arc<Mutex<HashMap<String, CardAssignment>>>;
-
-// Client cards registry (keyed by client_id, contains list of card_ids)
-type ClientCards = Arc<Mutex<HashMap<String, Vec<String>>>>;
 
 // Start the HTTP server with Tokio
 pub fn start_server(board_ref: Arc<Mutex<Board>>, pouch_ref: Arc<Mutex<Pouch>>) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>) {
@@ -222,66 +139,19 @@ async fn handle_request(
             handle_get_assigned_card(req, client_registry, card_assignments, card_id).await
         }
         (&Method::GET, "/board") => {
-            let numbers = get_numbers_from_board(&board_ref);
-            let response = BoardResponse { board: numbers };
-            let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
-            Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", "application/json")
-                .header("Access-Control-Allow-Origin", "*")
-                .body(Full::new(Bytes::from(body)))
-                .unwrap()
+            handle_board(board_ref).await
         }
         (&Method::GET, "/pouch") => {
-            let (pouch_numbers, remaining) = get_pouch_info(&pouch_ref);
-            let response = PouchResponse { pouch: pouch_numbers, remaining };
-            let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
-            Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", "application/json")
-                .header("Access-Control-Allow-Origin", "*")
-                .body(Full::new(Bytes::from(body)))
-                .unwrap()
+            handle_pouch(pouch_ref).await
         }
         (&Method::GET, "/scorecard") => {
-            let scorecard = get_scorecard_from_board(&board_ref);
-            let response = ScorecardResponse { scorecard };
-            let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
-            Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", "application/json")
-                .header("Access-Control-Allow-Origin", "*")
-                .body(Full::new(Bytes::from(body)))
-                .unwrap()
+            handle_scorecard(board_ref).await
         }
         (&Method::GET, "/status") => {
-            let board_len = get_board_length(&board_ref);
-            let scorecard = get_scorecard_from_board(&board_ref);
-            let response = json!({
-                "status": "running",
-                "numbers_extracted": board_len,
-                "scorecard": scorecard,
-                "server": "tokio-hyper"
-            });
-            let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
-            Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", "application/json")
-                .header("Access-Control-Allow-Origin", "*")
-                .body(Full::new(Bytes::from(body)))
-                .unwrap()
+            handle_status(board_ref).await
         }
         _ => {
-            let response = ErrorResponse {
-                error: "Not found".to_string(),
-            };
-            let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
-            Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .header("Content-Type", "application/json")
-                .header("Access-Control-Allow-Origin", "*")
-                .body(Full::new(Bytes::from(body)))
-                .unwrap()
+            handle_not_found().await
         }
     };
 
@@ -364,29 +234,19 @@ async fn handle_register(
     if let Some(card_count) = register_request.nocard {
         println!("🎴 Generating {} cards for client '{}' during registration", card_count, register_request.name);
         
-        // Generate the requested number of cards using the card generator
-        let generator = TombolaGenerator::new();
-        let cards = generator.generate_cards(card_count as usize);
+        // Generate the requested number of cards using the card management
+        let generator = CardManagement::new();
+        let (_, client_card_ids, assignments) = generator.generate_and_assign_cards(card_count, client_id.clone());
         
         // Store the cards in the registries
-        if let (Ok(mut assignments), Ok(mut client_cards_map)) = (card_assignments.lock(), client_cards.lock()) {
-            let mut card_ids_for_client = Vec::new();
-            
-            for card_with_id in cards {
-                let card_id_hex = format!("{:016X}", card_with_id.id);
-                
-                // Store card assignment
-                assignments.insert(card_id_hex.clone(), CardAssignment {
-                    card_id: card_id_hex.clone(),
-                    client_id: client_id.clone(),
-                    card_data: card_with_id.card,
-                });
-                
-                card_ids_for_client.push(card_id_hex);
+        if let (Ok(mut assignments_map), Ok(mut client_cards_map)) = (card_assignments.lock(), client_cards.lock()) {
+            // Store assignments
+            for assignment in assignments {
+                assignments_map.insert(assignment.card_id.clone(), assignment);
             }
             
             // Store card IDs for this client
-            client_cards_map.insert(client_id.clone(), card_ids_for_client);
+            client_cards_map.insert(client_id.clone(), client_card_ids);
             
             println!("✅ Generated and assigned {} cards to client '{}'", card_count, register_request.name);
         } else {
@@ -412,7 +272,7 @@ async fn handle_register(
 // Function to get numbers from the board reference
 fn get_numbers_from_board(board_ref: &Arc<Mutex<Board>>) -> Vec<Number> {
     if let Ok(board) = board_ref.lock() {
-        board.get_numbers()
+        board.get_numbers().clone()
     } else {
         Vec::new()
     }
@@ -443,23 +303,6 @@ fn get_pouch_info(pouch_ref: &Arc<Mutex<Pouch>>) -> (Vec<Number>, usize) {
     } else {
         (Vec::new(), 0)
     }
-}
-
-// Client ID generation function
-fn generate_client_id(name: &str, client_type: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    
-    // Hash the client info with current timestamp for uniqueness
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    
-    hasher.write(name.as_bytes());
-    hasher.write(client_type.as_bytes());
-    hasher.write(&timestamp.to_be_bytes());
-    
-    format!("{:016X}", hasher.finish())
 }
 
 async fn handle_client_info(
@@ -611,37 +454,19 @@ async fn handle_generate_cards(
         }
     }
 
-    // Generate cards using the TombolaGenerator
-    let generator = TombolaGenerator::new();
-    let cards_with_ids = generator.generate_cards(generate_request.count as usize);
+    // Generate cards using the CardManagement
+    let generator = CardManagement::new();
+    let (card_infos, client_card_ids, assignments) = generator.generate_and_assign_cards(generate_request.count, client_id.clone());
 
-    // Store card assignments
-    let mut card_infos = Vec::new();
-    if let (Ok(mut assignments), Ok(mut client_cards_map)) = (card_assignments.lock(), client_cards.lock()) {
-        let client_card_ids = client_cards_map.entry(client_id.clone()).or_insert_with(Vec::new);
+    // Store card assignments in the registries
+    if let (Ok(mut assignments_map), Ok(mut client_cards_map)) = (card_assignments.lock(), client_cards.lock()) {
+        let client_card_list = client_cards_map.entry(client_id.clone()).or_insert_with(Vec::new);
         
-        for card_with_id in cards_with_ids {
-            let card_id_str = format!("{:016X}", card_with_id.id);
-            
-            // Store the assignment
-            assignments.insert(card_id_str.clone(), CardAssignment {
-                card_id: card_id_str.clone(),
-                client_id: client_id.clone(),
-                card_data: card_with_id.card.clone(),
-            });
-            
-            // Add to client's card list
-            client_card_ids.push(card_id_str.clone());
-            
-            // Convert Card to CardInfo for response
-            let card_info = CardInfo {
-                card_id: card_id_str,
-                card_data: card_with_id.card.iter().map(|row| {
-                    row.iter().map(|cell| *cell).collect()
-                }).collect(),
-            };
-            card_infos.push(card_info);
+        // Store assignments and update client card list
+        for assignment in assignments {
+            assignments_map.insert(assignment.card_id.clone(), assignment);
         }
+        client_card_list.extend(client_card_ids);
     }
 
     println!("✅ Generated {} cards for client {}", card_infos.len(), client_id);
@@ -857,6 +682,78 @@ async fn handle_get_assigned_card(
     let body = serde_json::to_string(&card_info).unwrap_or_else(|_| "{}".to_string());
     Response::builder()
         .status(StatusCode::OK)
+        .header("Content-Type", "application/json")
+        .header("Access-Control-Allow-Origin", "*")
+        .body(Full::new(Bytes::from(body)))
+        .unwrap()
+}
+
+// Handle board endpoint
+async fn handle_board(board_ref: Arc<Mutex<Board>>) -> Response<Full<Bytes>> {
+    let numbers = get_numbers_from_board(&board_ref);
+    let response = BoardResponse { board: numbers };
+    let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/json")
+        .header("Access-Control-Allow-Origin", "*")
+        .body(Full::new(Bytes::from(body)))
+        .unwrap()
+}
+
+// Handle pouch endpoint
+async fn handle_pouch(pouch_ref: Arc<Mutex<Pouch>>) -> Response<Full<Bytes>> {
+    let (pouch_numbers, remaining) = get_pouch_info(&pouch_ref);
+    let response = PouchResponse { pouch: pouch_numbers, remaining };
+    let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/json")
+        .header("Access-Control-Allow-Origin", "*")
+        .body(Full::new(Bytes::from(body)))
+        .unwrap()
+}
+
+// Handle scorecard endpoint
+async fn handle_scorecard(board_ref: Arc<Mutex<Board>>) -> Response<Full<Bytes>> {
+    let scorecard = get_scorecard_from_board(&board_ref);
+    let response = ScorecardResponse { scorecard };
+    let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/json")
+        .header("Access-Control-Allow-Origin", "*")
+        .body(Full::new(Bytes::from(body)))
+        .unwrap()
+}
+
+// Handle status endpoint
+async fn handle_status(board_ref: Arc<Mutex<Board>>) -> Response<Full<Bytes>> {
+    let board_len = get_board_length(&board_ref);
+    let scorecard = get_scorecard_from_board(&board_ref);
+    let response = json!({
+        "status": "running",
+        "numbers_extracted": board_len,
+        "scorecard": scorecard,
+        "server": "tokio-hyper"
+    });
+    let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/json")
+        .header("Access-Control-Allow-Origin", "*")
+        .body(Full::new(Bytes::from(body)))
+        .unwrap()
+}
+
+// Handle 404 not found
+async fn handle_not_found() -> Response<Full<Bytes>> {
+    let response = ErrorResponse {
+        error: "Not found".to_string(),
+    };
+    let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
         .header("Content-Type", "application/json")
         .header("Access-Control-Allow-Origin", "*")
         .body(Full::new(Bytes::from(body)))

@@ -5,9 +5,51 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
 use rand::seq::SliceRandom;
 use rand::rng;
+use serde::{Deserialize, Serialize};
+
+// Card generation request
+#[derive(Debug, Deserialize)]
+pub struct GenerateCardsRequest {
+    pub count: u32,
+}
+
+// Card generation response
+#[derive(Debug, Serialize)]
+pub struct GenerateCardsResponse {
+    pub cards: Vec<CardInfo>,
+    pub message: String,
+}
+
+// Card info for responses
+#[derive(Debug, Serialize)]
+pub struct CardInfo {
+    pub card_id: String,
+    pub card_data: Vec<Vec<Option<u8>>>, // Changed to Option<u8> to match Card structure
+}
+
+// List assigned cards response
+#[derive(Debug, Serialize)]
+pub struct ListAssignedCardsResponse {
+    pub cards: Vec<AssignedCardInfo>,
+}
+
+// Assigned card info
+#[derive(Debug, Serialize)]
+pub struct AssignedCardInfo {
+    pub card_id: String,
+    pub assigned_to: String,
+}
+
+// Card assignment storage
+#[derive(Debug, Clone)]
+pub struct CardAssignment {
+    pub card_id: String,
+    pub client_id: String,
+    pub card_data: Card,
+}
 
 #[derive(Debug, Clone)]
-pub struct TombolaGenerator;
+pub struct CardManagement;
 
 #[derive(Debug, Clone)]
 pub struct CardWithId {
@@ -17,7 +59,7 @@ pub struct CardWithId {
 
 pub type Card = Vec<Vec<Option<Number>>>;  // BOARDCONFIG.rows_per_card rows × (LASTNUMBER/10) columns
 
-impl TombolaGenerator {
+impl CardManagement {
     pub fn new() -> Self {
         Self
     }
@@ -33,7 +75,7 @@ impl TombolaGenerator {
         let allocation_matrix = self.create_allocation_matrix(distribution);
         
         // Step 3: Distribute actual numbers
-        let cards = self.distribute_numbers(allocation_matrix);
+        let cards = self.distribute_numbers(&allocation_matrix);
         
         // Step 4: Position numbers in cards respecting row constraints
         let mut cards = self.position_numbers_in_cards(cards);
@@ -88,7 +130,7 @@ impl TombolaGenerator {
         matrix
     }
 
-    fn distribute_numbers(&self, allocation_matrix: Vec<Vec<Number>>) -> Vec<Vec<Vec<Number>>> {
+    fn distribute_numbers(&self, allocation_matrix: &[Vec<Number>]) -> Vec<Vec<Vec<Number>>> {
         let columns = ((LASTNUMBER - FIRSTNUMBER + 1) / 10) as usize;
         let mut cards_numbers = vec![vec![Vec::new(); columns]; CARDSNUMBER as usize];
         let mut rng = rng();
@@ -111,7 +153,7 @@ impl TombolaGenerator {
                 // Last column (9th): 80-89 (excluding 90 which is temporarily in column 0)
                 (80..=89).collect()
             } else {
-                // Other columns: (col * 10) to (col * 10 + 9)
+                // Other columns: Calculate range dynamically
                 let start = col * 10;
                 let end = start + 9;
                 (start as Number..=end as Number).collect()
@@ -122,10 +164,18 @@ impl TombolaGenerator {
             let mut number_index = 0;
             for card in 0..CARDSNUMBER as usize {
                 let quantity = allocation_matrix[card][col] as usize;
-                for _ in 0..quantity {
-                    if number_index < column_numbers.len() {
-                        cards_numbers[card][col].push(column_numbers[number_index]);
-                        number_index += 1;
+                if number_index + quantity <= column_numbers.len() {
+                    // Use slice operations for better performance
+                    let numbers_to_add = &column_numbers[number_index..number_index + quantity];
+                    cards_numbers[card][col].extend_from_slice(numbers_to_add);
+                    number_index += quantity;
+                } else {
+                    // Fallback to individual pushes if we don't have enough numbers
+                    for _ in 0..quantity {
+                        if number_index < column_numbers.len() {
+                            cards_numbers[card][col].push(column_numbers[number_index]);
+                            number_index += 1;
+                        }
                     }
                 }
                 // Sort numbers in each column of each card
@@ -154,11 +204,11 @@ impl TombolaGenerator {
         
         let mut cards = Vec::new();
 
-        for card_numbers in cards_numbers {
+        for card_numbers in &cards_numbers {
             let mut card = vec![vec![None; columns]; BOARDCONFIG.rows_per_card as usize];
             
             // Create a strategy to ensure each row has exactly cols_per_card numbers
-            let row_assignment = self.calculate_row_assignments(&card_numbers, columns);
+            let row_assignment = self.calculate_row_assignments(card_numbers, columns);
             
             // Position numbers according to the calculated assignment
             for col in 0..columns {
@@ -212,7 +262,7 @@ impl TombolaGenerator {
 
         // Generate complete blocks of CARDSNUMBER cards
         while remaining_cards > CARDSNUMBER as usize {
-            let mut block = self.generate_card_group_with_ids();
+            let block = self.generate_card_group_with_ids();
             
             // Check for global duplicates across all generated blocks
             let mut has_global_duplicates = false;
@@ -229,12 +279,12 @@ impl TombolaGenerator {
                 continue; // Regenerate this block
             }
             
-            // Add IDs to global set
+            // Add IDs to global set and extend all_cards
             for card_with_id in &block {
                 global_ids.insert(card_with_id.id);
             }
             
-            all_cards.append(&mut block);
+            all_cards.extend(block);
             remaining_cards -= CARDSNUMBER as usize;
         }
 
@@ -264,7 +314,7 @@ impl TombolaGenerator {
                     final_block.truncate(remaining_cards);
                 }
                 
-                all_cards.append(&mut final_block);
+                all_cards.extend(final_block);
                 break;
             }
         }
@@ -308,27 +358,135 @@ impl TombolaGenerator {
             let mut has_duplicates = false;
             
             // Generate IDs for all cards and check for duplicates
-            for card in cards {
-                let id = self.generate_card_id(&card);
+            for card in &cards {
+                let id = self.generate_card_id(card);
                 if seen_ids.contains(&id) {
                     has_duplicates = true;
                     break;
                 }
                 seen_ids.insert(id);
-                cards_with_ids.push(CardWithId { id, card });
             }
             
             if !has_duplicates {
+                // Only create CardWithId structs if no duplicates found
+                for card in cards {
+                    let id = self.generate_card_id(&card);
+                    cards_with_ids.push(CardWithId { id, card });
+                }
                 return cards_with_ids;
             }
             
             if attempt >= MAX_RETRIES {
                 eprintln!("Warning: Could not generate unique card IDs after {} attempts", MAX_RETRIES);
                 eprintln!("Proceeding with potentially duplicate IDs");
+                // Create CardWithId structs even with duplicates
+                for card in cards {
+                    let id = self.generate_card_id(&card);
+                    cards_with_ids.push(CardWithId { id, card });
+                }
                 return cards_with_ids;
             }
             
             println!("Duplicate card ID detected, regenerating group (attempt {})", attempt);
         }
+    }
+    
+    /// Generate cards for a client and return card info structures
+    pub fn generate_cards_for_client(&self, count: u32) -> Vec<CardInfo> {
+        let cards_with_ids = self.generate_cards(count as usize);
+        
+        cards_with_ids.into_iter().map(|card_with_id| {
+            let card_id_str = format!("{:016X}", card_with_id.id);
+            CardInfo {
+                card_id: card_id_str,
+                card_data: card_with_id.card.iter().map(|row| {
+                    row.iter().map(|cell| *cell).collect()
+                }).collect(),
+            }
+        }).collect()
+    }
+    
+    /// Create a card assignment from a CardWithId and client_id
+    pub fn create_card_assignment(&self, card_with_id: CardWithId, client_id: String) -> CardAssignment {
+        let card_id_str = format!("{:016X}", card_with_id.id);
+        CardAssignment {
+            card_id: card_id_str,
+            client_id,
+            card_data: card_with_id.card,
+        }
+    }
+    
+    /// Convert Card to CardInfo for responses
+    pub fn card_to_info(&self, card: &Card, card_id: String) -> CardInfo {
+        CardInfo {
+            card_id,
+            card_data: card.iter().map(|row| {
+                row.iter().map(|cell| *cell).collect()
+            }).collect(),
+        }
+    }
+    
+    /// Generate cards and assignments for a client
+    pub fn generate_cards_and_assignments(&self, count: u32, client_id: String) -> (Vec<CardInfo>, Vec<CardAssignment>) {
+        let cards_with_ids = self.generate_cards(count as usize);
+        let mut card_infos = Vec::new();
+        let mut assignments = Vec::new();
+        
+        for card_with_id in cards_with_ids {
+            let card_id_str = format!("{:016X}", card_with_id.id);
+            
+            // Create assignment
+            let assignment = CardAssignment {
+                card_id: card_id_str.clone(),
+                client_id: client_id.clone(),
+                card_data: card_with_id.card.clone(),
+            };
+            assignments.push(assignment);
+            
+            // Create card info for response
+            let card_info = CardInfo {
+                card_id: card_id_str,
+                card_data: card_with_id.card.iter().map(|row| {
+                    row.iter().map(|cell| *cell).collect()
+                }).collect(),
+            };
+            card_infos.push(card_info);
+        }
+        
+        (card_infos, assignments)
+    }
+    
+    /// Generate cards and handle complete assignment process
+    pub fn generate_and_assign_cards(&self, count: u32, client_id: String) -> (Vec<CardInfo>, Vec<String>, Vec<CardAssignment>) {
+        let cards_with_ids = self.generate_cards(count as usize);
+        let mut card_infos = Vec::new();
+        let mut client_card_ids = Vec::new();
+        let mut assignments = Vec::new();
+        
+        for card_with_id in cards_with_ids {
+            let card_id_str = format!("{:016X}", card_with_id.id);
+            
+            // Create assignment
+            let assignment = CardAssignment {
+                card_id: card_id_str.clone(),
+                client_id: client_id.clone(),
+                card_data: card_with_id.card.clone(),
+            };
+            assignments.push(assignment);
+            
+            // Add to client's card list
+            client_card_ids.push(card_id_str.clone());
+            
+            // Convert Card to CardInfo for response
+            let card_info = CardInfo {
+                card_id: card_id_str,
+                card_data: card_with_id.card.iter().map(|row| {
+                    row.iter().map(|cell| *cell).collect()
+                }).collect(),
+            };
+            card_infos.push(card_info);
+        }
+        
+        (card_infos, client_card_ids, assignments)
     }
 }

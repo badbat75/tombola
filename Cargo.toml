@@ -19,13 +19,13 @@ hyper-util = { version = "0.1", features = ["full"] }
 http-body-util = "0.1"
 
 [[bin]]
-name = "tombola"
+name = "tombola-server"
 path = "src/tombola_server.rs"
 
 [[bin]]
-name = "tombola_client"
-path = "src/terminal_client.rs"
+name = "board_client"
+path = "src/board_client.rs"
 
 [[bin]]
-name = "client"
-path = "src/client.rs"
+name = "card_client"
+path = "src/card_client.rs"
