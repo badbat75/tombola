@@ -24,9 +24,10 @@ impl ScoreCard {
         ScoreCard { scorecard: score }
     }
 
-    pub fn allcards_calculate_score(&self, board_numbers: &[Number], card_assignments: &std::collections::HashMap<String, crate::card::CardAssignment>) -> Vec<(String, Number, Vec<Number>)> {
-        let mut card_scores = Vec::new();
+    pub fn allcards_calculate_score(&self, board_numbers: &[Number], card_assignments: &std::collections::HashMap<String, crate::card::CardAssignment>) -> (Number, Vec<(String, Vec<Number>)>) {
+        let mut card_details = Vec::new();
         let current_scorecard = self.scorecard; // Get the current scorecard value
+        let mut global_score = 0;
         
         // Iterate through all card assignments
         for (card_id, assignment) in card_assignments {
@@ -85,15 +86,74 @@ impl ScoreCard {
                 0
             };
             
-            // Only include cards that have achieved a score greater than the current scorecard
-            // This prevents showing "old" achievements that have already been surpassed
-            if card_score > current_scorecard {
-                // Store the result: (card_id, score, numbers_to_mark)
-                card_scores.push((card_id.clone(), card_score, extracted_card_numbers));
+            // Update the global score to the highest score achieved by any card
+            if card_score > global_score {
+                global_score = card_score;
+            }
+            
+            // Only include cards that have achieved a meaningful score (>= 2) and have extracted numbers
+            if card_score >= 2 && !extracted_card_numbers.is_empty() {
+                card_details.push((card_id.clone(), extracted_card_numbers));
             }
         }
         
-        card_scores
+        // Only return results if the global score is greater than the current scorecard
+        if global_score > current_scorecard {
+            // Filter card_details to only include cards that achieved the global score
+            let filtered_card_details: Vec<(String, Vec<Number>)> = card_details.into_iter()
+                .filter(|(card_id, _)| {
+                    // Recalculate the score for this card to check if it matches the global score
+                    if let Some(assignment) = card_assignments.get(card_id) {
+                        let mut card_numbers = Vec::new();
+                        for row in &assignment.card_data {
+                            for cell in row {
+                                if let Some(number) = cell {
+                                    card_numbers.push(*number);
+                                }
+                            }
+                        }
+                        
+                        let mut extracted_card_numbers = Vec::new();
+                        for &card_number in &card_numbers {
+                            if board_numbers.contains(&card_number) {
+                                extracted_card_numbers.push(card_number);
+                            }
+                        }
+                        
+                        let card_score = if extracted_card_numbers.len() == card_numbers.len() && !card_numbers.is_empty() {
+                            NUMBERSPERCARD
+                        } else if !extracted_card_numbers.is_empty() {
+                            let mut max_line_score = 0;
+                            for row_index in 0..3 {
+                                let row = &assignment.card_data[row_index];
+                                let mut row_extracted_count = 0;
+                                for cell in row {
+                                    if let Some(number) = cell {
+                                        if board_numbers.contains(number) {
+                                            row_extracted_count += 1;
+                                        }
+                                    }
+                                }
+                                if row_extracted_count > max_line_score {
+                                    max_line_score = row_extracted_count;
+                                }
+                            }
+                            if max_line_score >= 2 { max_line_score } else { 0 }
+                        } else {
+                            0
+                        };
+                        
+                        card_score == global_score
+                    } else {
+                        false
+                    }
+                })
+                .collect();
+            
+            (global_score, filtered_card_details)
+        } else {
+            (0, Vec::new())
+        }
     }
 
     pub fn board_calculate_score(&self, board_numbers: &[Number]) -> (Number, Vec<Number>) {

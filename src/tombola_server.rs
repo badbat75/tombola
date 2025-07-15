@@ -68,37 +68,37 @@ async fn main() {
             // Add the extracted number to the shared board and check for prizes
             board.push(extracted);
 
-            ////////////////////////////////////////////////////////////
-
-            // Calculate score and numbers to mark
+            // Calculate score and numbers to mark 
             let (new_score, numbers_to_mark) = board.get_scorecard_ref().board_calculate_score(&board.get_numbers());
-            // Update the scorecard score
-            board.update_scorecard(new_score);
-            
+
             // Update marked numbers based on scoring
             board.update_marked_numbers(numbers_to_mark);
-
+ 
             ////////////////////////////////////////////////////////////
 
             // Calculate scores for all cards
             if let Ok(card_assignments_map) = card_manager.lock() {
                 let assignments = card_assignments_map.get_all_assignments();
                 
-                let all_card_scores = board.get_scorecard_ref().allcards_calculate_score(
+                let (global_score, card_details) = board.get_scorecard_ref().allcards_calculate_score(
                     &board.get_numbers(), 
                     assignments
                 );
                 
-                if !all_card_scores.is_empty() {
-                    println!("\n🎯 All Card Scores:");
-                    for (card_id, score, marked_numbers) in all_card_scores {
-                        println!("  Card {}: Score = {}, Marked = {:?}", card_id, score, marked_numbers);
+                if global_score > 0 && !card_details.is_empty() {
+                    println!("\n🎯 All Card Scores - Global Score: {}", global_score);
+                    for (card_id, marked_numbers) in card_details {
+                        println!("  Card {}: Marked = {:?}", card_id, marked_numbers);
                     }
                     println!();
                 }
             }
 
             ////////////////////////////////////////////////////////////
+
+            // Update the scorecard score
+            board.update_scorecard(new_score);
+            
 
             // Show the current state on configured IO device
             if let Ok(pouch) = pouch_ref.lock() {
