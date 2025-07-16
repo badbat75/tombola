@@ -3,42 +3,23 @@
 // and displays it using the terminal functions.
 
 use std::error::Error;
-use serde::Deserialize;
 use tombola::defs::Number;
 use tombola::board::Board;
 use tombola::terminal;
-
-// Response structures matching the server API
-#[derive(Deserialize)]
-struct BoardResponse {
-    board: Vec<Number>,
-}
-
-#[derive(Deserialize)]
-struct PouchResponse {
-    pouch: Vec<Number>,
-    remaining: usize,
-}
-
-#[derive(Deserialize)]
-struct ScoremapResponse {
-    scorecard: Number,
-    score_map: std::collections::HashMap<Number, Vec<String>>,
-}
 
 // Client configuration
 const SERVER_BASE_URL: &str = "http://127.0.0.1:3000";
 
 pub async fn run_client() -> Result<(), Box<dyn Error>> {
     println!("Tombola Terminal Client");
-    print!("Connecting to server at {}...", SERVER_BASE_URL);
+    print!("Connecting to server at {SERVER_BASE_URL}...");
 
     // Test server connectivity first
     match test_server_connection().await {
         Ok(_) => println!("Ok. ✓"),
         Err(e) => {
-            eprintln!("Error. ✗ Failed to connect to server: {}", e);
-            eprintln!("Make sure the tombola server is running on {}", SERVER_BASE_URL);
+            eprintln!("Error. ✗ Failed to connect to server: {e}");
+            eprintln!("Make sure the tombola server is running on {SERVER_BASE_URL}");
             return Err(e);
         }
     }
@@ -68,7 +49,7 @@ pub async fn run_client() -> Result<(), Box<dyn Error>> {
 }
 
 async fn test_server_connection() -> Result<(), Box<dyn Error>> {
-    let url = format!("{}/status", SERVER_BASE_URL);
+    let url = format!("{SERVER_BASE_URL}/status");
     let response = reqwest::get(&url).await?;
     
     if response.status().is_success() {
@@ -79,47 +60,36 @@ async fn test_server_connection() -> Result<(), Box<dyn Error>> {
 }
 
 async fn get_board_data() -> Result<Vec<Number>, Box<dyn Error>> {
-    let url = format!("{}/board", SERVER_BASE_URL);
+    let url = format!("{SERVER_BASE_URL}/board");
     let response = reqwest::get(&url).await?;
     
     if response.status().is_success() {
-        let board_response: BoardResponse = response.json().await?;
-        Ok(board_response.board)
+        let board: Board = response.json().await?;
+        Ok(board.get_numbers().clone())
     } else {
         Err(format!("Failed to get board data: {}", response.status()).into())
     }
 }
 
 async fn get_pouch_data() -> Result<Vec<Number>, Box<dyn Error>> {
-    let url = format!("{}/pouch", SERVER_BASE_URL);
+    let url = format!("{SERVER_BASE_URL}/pouch");
     let response = reqwest::get(&url).await?;
     
     if response.status().is_success() {
-        let pouch_response: PouchResponse = response.json().await?;
-        println!("Server reports {} numbers remaining in pouch", pouch_response.remaining);
-        Ok(pouch_response.pouch)
+        let pouch: tombola::pouch::Pouch = response.json().await?;
+        println!("Server reports {} numbers remaining in pouch", pouch.remaining);
+        Ok(pouch.numbers)
     } else {
         Err(format!("Server error: {}", response.status()).into())
     }
 }
 
 async fn get_scoremap() -> Result<tombola::score::ScoreCard, Box<dyn Error>> {
-    let url = format!("{}/scoremap", SERVER_BASE_URL);
+    let url = format!("{SERVER_BASE_URL}/scoremap");
     let response = reqwest::get(&url).await?;
     
     if response.status().is_success() {
-        let scoremap_response: ScoremapResponse = response.json().await?;
-        // Create a ScoreCard from the response
-        let mut scorecard = tombola::score::ScoreCard::new();
-        
-        // Set the scorecard value from the response
-        scorecard.update_scorecard(scoremap_response.scorecard);
-        
-        // Update the score map
-        for (score_idx, card_ids) in scoremap_response.score_map {
-            scorecard.update_score_map(score_idx, card_ids);
-        }
-        
+        let scorecard: tombola::score::ScoreCard = response.json().await?;
         Ok(scorecard)
     } else {
         Err(format!("Server error: {}", response.status()).into())
@@ -133,7 +103,7 @@ async fn main() {
             println!("Client finished successfully.");
         }
         Err(e) => {
-            eprintln!("Error: {}", e);
+            eprintln!("Error: {e}");
             std::process::exit(1);
         }
     }

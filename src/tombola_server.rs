@@ -125,8 +125,7 @@ async fn main() {
                     }
                     card_ids
                 } else {
-                    let mut card_ids: Vec<String> = Vec::new();
-                    card_ids.push("0000000000000000".to_string());
+                    let card_ids: Vec<String> = vec!["0000000000000000".to_string()];
                     card_ids
                 };
                 scorecard.update_scorecard(bestscore);

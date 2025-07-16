@@ -1,9 +1,11 @@
 use tombola::defs::{NUMBERSPERCARD};
+use tombola::score::ScoreCard;
+use tombola::board::Board;
+use tombola::pouch::Pouch;
 
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
-use chrono;
 
 // Client registration request
 #[derive(Debug, Serialize)]
@@ -21,23 +23,6 @@ struct RegisterResponse {
 }
 
 // Generic API response structure
-#[derive(Debug, Deserialize)]
-struct BoardResponse {
-    board: Vec<u8>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ScorecardResponse {
-    scorecard: u8,
-    score_map: std::collections::HashMap<u8, Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PouchResponse {
-    pouch: Vec<u8>,
-    remaining: usize,
-}
-
 #[derive(Debug, Deserialize)]
 struct ErrorResponse {
     error: String,
@@ -140,7 +125,7 @@ impl TombolaClient {
             Ok(())
         } else {
             let error_text = response.text().await?;
-            Err(format!("Registration failed: {}", error_text).into())
+            Err(format!("Registration failed: {error_text}").into())
         }
     }
 
@@ -177,8 +162,8 @@ impl TombolaClient {
             .await?;
 
         if response.status().is_success() {
-            let board_response: BoardResponse = response.json().await?;
-            Ok(board_response.board)
+            let board: Board = response.json().await?;
+            Ok(board.get_numbers().clone())
         } else {
             let error_response: ErrorResponse = response.json().await?;
             Err(format!("Failed to get board: {}", error_response.error).into())
@@ -198,8 +183,8 @@ impl TombolaClient {
             .await?;
 
         if response.status().is_success() {
-            let scorecard_response: ScorecardResponse = response.json().await?;
-            Ok(scorecard_response.scorecard)
+            let scorecard: ScoreCard = response.json().await?;
+            Ok(scorecard.scorecard)
         } else {
             let error_response: ErrorResponse = response.json().await?;
             Err(format!("Failed to get scorecard: {}", error_response.error).into())
@@ -219,8 +204,8 @@ impl TombolaClient {
             .await?;
 
         if response.status().is_success() {
-            let pouch_response: PouchResponse = response.json().await?;
-            Ok((pouch_response.pouch, pouch_response.remaining))
+            let pouch: Pouch = response.json().await?;
+            Ok((pouch.numbers, pouch.remaining))
         } else {
             let error_response: ErrorResponse = response.json().await?;
             Err(format!("Failed to get pouch: {}", error_response.error).into())
@@ -318,7 +303,7 @@ impl TombolaClient {
     pub async fn start_monitoring(&self, interval_seconds: u64) -> Result<(), Box<dyn std::error::Error>> {
         self.ensure_registered()?;
         
-        println!("🔄 Starting game monitoring (polling every {} seconds)...", interval_seconds);
+        println!("🔄 Starting game monitoring (polling every {interval_seconds} seconds)...");
         println!("   Client ID: {}", self.client_id.as_ref().unwrap());
         
         loop {
@@ -332,12 +317,12 @@ impl TombolaClient {
                             println!("🎯 Current Board ({} numbers): {:?}", board.len(), board);
                         }
                         Err(e) => {
-                            println!("⚠️  Failed to get board: {}", e);
+                            println!("⚠️  Failed to get board: {e}");
                         }
                     }
                 }
                 Err(e) => {
-                    println!("❌ Failed to get status: {}", e);
+                    println!("❌ Failed to get status: {e}");
                 }
             }
             
@@ -373,10 +358,10 @@ fn main() {
             match nocard_value.parse::<u32>() {
                 Ok(count) => {
                     client.set_nocard(count);
-                    println!("🎴 Will request {} cards during registration", count);
+                    println!("🎴 Will request {count} cards during registration");
                 }
                 Err(_) => {
-                    println!("❌ Invalid nocard value: '{}'. Using default of 1 card.", nocard_value);
+                    println!("❌ Invalid nocard value: '{nocard_value}'. Using default of 1 card.");
                     client.set_nocard(1);
                 }
             }
@@ -390,7 +375,7 @@ fn main() {
     let rt = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
         Err(e) => {
-            println!("❌ Failed to create Tokio runtime: {}", e);
+            println!("❌ Failed to create Tokio runtime: {e}");
             std::process::exit(1);
         }
     };
@@ -405,7 +390,7 @@ fn main() {
             let assigned_cards = match rt.block_on(client.list_assigned_cards()) {
                 Ok(response) => response.cards,
                 Err(e) => {
-                    println!("❌ Failed to list assigned cards: {}", e);
+                    println!("❌ Failed to list assigned cards: {e}");
                     std::process::exit(1);
                 }
             };
@@ -439,7 +424,7 @@ fn main() {
                         board
                     },
                     Err(e) => {
-                        println!("⚠️  Warning: Failed to get board state: {}", e);
+                        println!("⚠️  Warning: Failed to get board state: {e}");
                         Vec::new()
                     }
                 };
@@ -448,14 +433,14 @@ fn main() {
                 let scorecard = match rt.block_on(client.get_scorecard()) {
                     Ok(scorecard) => {
                         if scorecard > 0 {
-                            println!("📊 Current scorecard: {} (achievements shown only if scorecard < achievement level)", scorecard);
+                            println!("📊 Current scorecard: {scorecard} (achievements shown only if scorecard < achievement level)");
                         } else {
                             println!("📊 No scorecard yet");
                         }
                         scorecard
                     },
                     Err(e) => {
-                        println!("⚠️  Warning: Failed to get scorecard: {}", e);
+                        println!("⚠️  Warning: Failed to get scorecard: {e}");
                         0 // Default to 0 if we can't get scorecard
                     }
                 };
@@ -486,7 +471,7 @@ fn main() {
                 if !bingo_cards.is_empty() {
                     println!("\n🏆 \x1b[1;32mCONGRATULATIONS! You have {} BINGO card(s)!\x1b[0m 🏆", bingo_cards.len());
                     for card_id in bingo_cards {
-                        println!("   🎉 BINGO with Card ID: {}", card_id);
+                        println!("   🎉 BINGO with Card ID: {card_id}");
                     }
                 }
 
@@ -497,17 +482,17 @@ fn main() {
             }
         }
         Err(e) => {
-            println!("❌ Registration failed: {}", e);
+            println!("❌ Registration failed: {e}");
             std::process::exit(1);
         }
     }
 }
 
-fn print_card_as_table_with_highlights(card_number: usize, card_id: &str, card_data: &Vec<Vec<Option<u8>>>, extracted_numbers: &Vec<u8>, scorecard: u8) -> (bool, Vec<String>) {
+fn print_card_as_table_with_highlights(card_number: usize, card_id: &str, card_data: &[Vec<Option<u8>>], extracted_numbers: &[u8], scorecard: u8) -> (bool, Vec<String>) {
     println!("\n┌────────────────────────────────────────────────────────────────────────────────┐");
     
     // Calculate proper spacing for the title to align the right border
-    let title_text = format!("Card {} - ID: {}", card_number, card_id);
+    let title_text = format!("Card {card_number} - ID: {card_id}");
     let box_width = 78; // Total width of the box content area (counting the actual characters)
     let padding = if title_text.len() < box_width {
         box_width - title_text.len()
@@ -539,7 +524,7 @@ fn print_card_as_table_with_highlights(card_number: usize, card_id: &str, card_d
                         extracted_count += 1;
                         row_extracted_count += 1;
                     } else {
-                        print!("   {:2}   |", number);
+                        print!("   {number:2}   |");
                     }
                 }
                 None => print!("        │"),
@@ -566,7 +551,7 @@ fn print_card_as_table_with_highlights(card_number: usize, card_id: &str, card_d
     // Check for BINGO (all numbers in the card have been extracted)
     let is_bingo = !all_card_numbers.is_empty() && extracted_count == all_card_numbers.len();
     if is_bingo {
-        println!("\n🎉 \x1b[1;32mBINGO with Card ID {} !!!!\x1b[0m 🎉", card_id);
+        println!("\n🎉 \x1b[1;32mBINGO with Card ID {card_id} !!!!\x1b[0m 🎉");
     } else if !all_card_numbers.is_empty() {
         println!("📊 Progress: {}/{} numbers extracted ({:.1}%)", 
                  extracted_count, 
@@ -578,7 +563,7 @@ fn print_card_as_table_with_highlights(card_number: usize, card_id: &str, card_d
     if !lines_completed.is_empty() {
         println!("🏃 Line achievements:");
         for line in &lines_completed {
-            println!("   ✅ {}", line);
+            println!("   ✅ {line}");
         }
     }
     

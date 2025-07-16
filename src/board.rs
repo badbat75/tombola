@@ -3,14 +3,22 @@
 
 use crate::defs::Number;
 use std::collections::HashSet;
+use serde::{Deserialize, Serialize};
 
 // This struct represents the board in the Tombola game.
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Board {
     numbers: Vec<Number>,
     marked_numbers: HashSet<Number>,
 }
 
 // Implement general-purpose methods for the Board struct.
+impl Default for Board {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Board {
     pub fn new() -> Self {
         Board {
@@ -38,6 +46,10 @@ impl Board {
     
     pub fn len(&self) -> usize {
         self.numbers.len()
+    }
+    
+    pub fn is_empty(&self) -> bool {
+        self.numbers.is_empty()
     }
     
     pub fn get_sorted_entries(&self) -> Vec<(Number, bool)> {

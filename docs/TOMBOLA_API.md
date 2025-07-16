@@ -193,13 +193,14 @@ Get the current board state (numbers that have been extracted).
 **Response:**
 ```json
 {
-  "board": [15, 23, 37, 41, 52, 68, 74, 89]
+  "numbers": [15, 23, 37, 41, 52, 68, 74, 89],
+  "marked_numbers": [15, 23, 37, 41, 52, 68, 74, 89]
 }
 ```
 
 **Notes:**
-- Returns array of numbers in the order they were extracted
-- Empty array if no numbers have been extracted yet
+- Returns Board struct with numbers array (in extraction order) and marked_numbers set
+- Empty arrays if no numbers have been extracted yet
 
 #### GET /pouch
 
@@ -208,13 +209,14 @@ Get the current pouch state (remaining numbers).
 **Response:**
 ```json
 {
-  "pouch": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 38, 39, 40, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 69, 70, 71, 72, 73, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 90],
+  "numbers": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 38, 39, 40, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 69, 70, 71, 72, 73, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 90],
   "remaining": 82
 }
 ```
 
 **Notes:**
-- `pouch` contains all numbers that haven't been extracted yet
+- Returns Pouch struct directly with numbers array and remaining count
+- `numbers` contains all numbers that haven't been extracted yet
 - `remaining` is the count of numbers still in the pouch
 
 #### GET /scoremap
@@ -234,6 +236,7 @@ Get the current scorecard and score map (prize tracking information).
 ```
 
 **Notes:**
+- Returns ScoreCard struct directly with scorecard and score_map fields
 - `scorecard`: The most recently extracted number (current score)
 - `score_map`: Map of score indices to arrays of card IDs that achieved those scores
 - Returns `scorecard: 0` if no numbers have been extracted yet

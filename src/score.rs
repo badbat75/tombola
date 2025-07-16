@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use std::collections::HashMap;
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct ScoreCard {
     pub scorecard: Number,
     pub score_map: HashMap<Number, Vec<String>>, // score_idx -> Vec<cardid>
@@ -46,10 +46,8 @@ impl ScoreCard {
             // Extract all numbers from the card
             let mut card_numbers = Vec::new();
             for row in &assignment.card_data {
-                for cell in row {
-                    if let Some(number) = cell {
-                        card_numbers.push(*number);
-                    }
+                for &number in row.iter().flatten() {
+                    card_numbers.push(number);
                 }
             }
             
@@ -74,11 +72,9 @@ impl ScoreCard {
                     let row = &assignment.card_data[row_index];
                     let mut row_extracted_count = 0;
                     
-                    for cell in row {
-                        if let Some(number) = cell {
-                            if board_numbers.contains(number) {
-                                row_extracted_count += 1;
-                            }
+                    for &number in row.iter().flatten() {
+                        if board_numbers.contains(&number) {
+                            row_extracted_count += 1;
                         }
                     }
                     
@@ -118,10 +114,8 @@ impl ScoreCard {
                     if let Some(assignment) = card_assignments.get(card_id) {
                         let mut card_numbers = Vec::new();
                         for row in &assignment.card_data {
-                            for cell in row {
-                                if let Some(number) = cell {
-                                    card_numbers.push(*number);
-                                }
+                            for &number in row.iter().flatten() {
+                                card_numbers.push(number);
                             }
                         }
                         
@@ -139,11 +133,9 @@ impl ScoreCard {
                             for row_index in 0..3 {
                                 let row = &assignment.card_data[row_index];
                                 let mut row_extracted_count = 0;
-                                for cell in row {
-                                    if let Some(number) = cell {
-                                        if board_numbers.contains(number) {
-                                            row_extracted_count += 1;
-                                        }
+                                for &number in row.iter().flatten() {
+                                    if board_numbers.contains(&number) {
+                                        row_extracted_count += 1;
                                     }
                                 }
                                 if row_extracted_count > max_line_score {

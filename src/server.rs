@@ -21,24 +21,6 @@ use crate::card::{CardAssignmentManager, GenerateCardsRequest, GenerateCardsResp
 
 // Response structures for JSON serialization
 #[derive(serde::Serialize)]
-struct BoardResponse {
-    board: Vec<Number>,
-}
-
-
-#[derive(serde::Serialize)]
-struct ScoremapResponse {
-    scorecard: Number,
-    score_map: HashMap<Number, Vec<String>>,
-}
-
-#[derive(serde::Serialize)]
-struct PouchResponse {
-    pouch: Vec<Number>,
-    remaining: usize,
-}
-
-#[derive(serde::Serialize)]
 struct ErrorResponse {
     error: String,
 }
@@ -260,14 +242,7 @@ async fn handle_register(
         .unwrap()
 }
 
-// Function to get numbers from the board reference
-fn get_numbers_from_board(board_ref: &Arc<Mutex<Board>>) -> Vec<Number> {
-    if let Ok(board) = board_ref.lock() {
-        board.get_numbers().clone()
-    } else {
-        Vec::new()
-    }
-}
+
 
 // Function to get the board length
 fn get_board_length(board_ref: &Arc<Mutex<Board>>) -> usize {
@@ -288,14 +263,6 @@ fn get_scorecard_from_scorecard(scorecard_ref: &Arc<Mutex<ScoreCard>>) -> Number
 }
 
 // Function to get pouch information
-fn get_pouch_info(pouch_ref: &Arc<Mutex<Pouch>>) -> (Vec<Number>, usize) {
-    if let Ok(pouch) = pouch_ref.lock() {
-        (pouch.numbers.clone(), pouch.len())
-    } else {
-        (Vec::new(), 0)
-    }
-}
-
 async fn handle_client_info(
     client_name: &str,
     client_registry: ClientRegistry,
@@ -322,7 +289,7 @@ async fn handle_client_info(
     
     // Client not found
     let error_response = ErrorResponse {
-        error: format!("Client '{}' not found", client_name),
+        error: format!("Client '{client_name}' not found"),
     };
     let body = serde_json::to_string(&error_response).unwrap_or_else(|_| "{}".to_string());
     Response::builder()
@@ -667,7 +634,7 @@ async fn handle_get_assigned_card(
     let card_info = CardInfo {
         card_id: card_assignment.card_id,
         card_data: card_assignment.card_data.iter().map(|row| {
-            row.iter().map(|cell| *cell).collect()
+            row.to_vec()
         }).collect(),
     };
 
@@ -682,9 +649,13 @@ async fn handle_get_assigned_card(
 
 // Handle board endpoint
 async fn handle_board(board_ref: Arc<Mutex<Board>>) -> Response<Full<Bytes>> {
-    let numbers = get_numbers_from_board(&board_ref);
-    let response = BoardResponse { board: numbers };
-    let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
+    let board = if let Ok(board) = board_ref.lock() {
+        board.clone()
+    } else {
+        Board::new()
+    };
+    
+    let body = serde_json::to_string(&board).unwrap_or_else(|_| "{}".to_string());
     Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/json")
@@ -695,9 +666,12 @@ async fn handle_board(board_ref: Arc<Mutex<Board>>) -> Response<Full<Bytes>> {
 
 // Handle pouch endpoint
 async fn handle_pouch(pouch_ref: Arc<Mutex<Pouch>>) -> Response<Full<Bytes>> {
-    let (pouch_numbers, remaining) = get_pouch_info(&pouch_ref);
-    let response = PouchResponse { pouch: pouch_numbers, remaining };
-    let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
+    let pouch = if let Ok(pouch) = pouch_ref.lock() {
+        pouch.clone()
+    } else {
+        Pouch::new()
+    };
+    let body = serde_json::to_string(&pouch).unwrap_or_else(|_| "{}".to_string());
     Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/json")
@@ -708,14 +682,13 @@ async fn handle_pouch(pouch_ref: Arc<Mutex<Pouch>>) -> Response<Full<Bytes>> {
 
 // Handle scoremap endpoint
 async fn handle_scoremap(scorecard_ref: Arc<Mutex<ScoreCard>>) -> Response<Full<Bytes>> {
-    let scorecard_val = get_scorecard_from_scorecard(&scorecard_ref);
-    let score_map = if let Ok(scorecard) = scorecard_ref.lock() {
-        scorecard.get_scoremap().clone()
+    let scorecard = if let Ok(scorecard) = scorecard_ref.lock() {
+        scorecard.clone()
     } else {
-        HashMap::new()
+        ScoreCard::new()
     };
-    let response = ScoremapResponse { scorecard: scorecard_val, score_map };
-    let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
+    
+    let body = serde_json::to_string(&scorecard).unwrap_or_else(|_| "{}".to_string());
     Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/json")

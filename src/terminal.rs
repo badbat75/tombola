@@ -111,7 +111,7 @@ pub fn show_on_terminal(
                 x if *x == NUMBERSPERCARD => print!("{}BINGO!!!{}", Colors::yellow(), Colors::reset()),
                 _ => {} // Handle all other cases (do nothing)
             }
-            println!(" -> CardIDs {:?}", card_ids);
+            println!(" -> CardIDs {card_ids:?}");
         }
     }
 

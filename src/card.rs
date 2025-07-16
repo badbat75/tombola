@@ -60,6 +60,12 @@ pub struct CardWithId {
 
 pub type Card = Vec<Vec<Option<Number>>>;  // BOARDCONFIG.rows_per_card rows × (LASTNUMBER/10) columns
 
+impl Default for CardManagement {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CardManagement {
     pub fn new() -> Self {
         Self
@@ -102,7 +108,7 @@ impl CardManagement {
         let mut matrix = vec![vec![2 as Number; columns]; CARDSNUMBER as usize];
 
         // Anti-adjacency pattern for columns with 1 number
-        let single_number_pattern = vec![
+        let single_number_pattern = [
             vec![0, 3, 6],  // Card 1: columns 1,4,7
             vec![1, 4, 7],  // Card 2: columns 2,5,8  
             vec![2, 5, 8],  // Card 3: columns 3,6,9
@@ -193,13 +199,13 @@ impl CardManagement {
         
         // Move number 90 from column 0 back to column 8
         // This completes the uniform distribution strategy by putting 90 in its correct final position
-        for card_idx in 0..CARDSNUMBER as usize {
+        for card_numbers in cards_numbers.iter_mut().take(CARDSNUMBER as usize) {
             // Find and remove 90 from column 0
-            if let Some(pos) = cards_numbers[card_idx][0].iter().position(|&x| x == 90) {
-                cards_numbers[card_idx][0].remove(pos);
+            if let Some(pos) = card_numbers[0].iter().position(|&x| x == 90) {
+                card_numbers[0].remove(pos);
                 // Add 90 to column 8 and keep it sorted
-                cards_numbers[card_idx][8].push(90);
-                cards_numbers[card_idx][8].sort();
+                card_numbers[8].push(90);
+                card_numbers[8].sort();
             }
         }
         
@@ -321,7 +327,7 @@ impl CardManagement {
         }
 
         if total_regenerations > 0 {
-            println!("Total block regenerations due to global duplicates: {}", total_regenerations);
+            println!("Total block regenerations due to global duplicates: {total_regenerations}");
         }
 
         all_cards
@@ -378,7 +384,7 @@ impl CardManagement {
             }
             
             if attempt >= MAX_RETRIES {
-                eprintln!("Warning: Could not generate unique card IDs after {} attempts", MAX_RETRIES);
+                eprintln!("Warning: Could not generate unique card IDs after {MAX_RETRIES} attempts");
                 eprintln!("Proceeding with potentially duplicate IDs");
                 // Create CardWithId structs even with duplicates
                 for card in cards {
@@ -388,7 +394,7 @@ impl CardManagement {
                 return cards_with_ids;
             }
             
-            println!("Duplicate card ID detected, regenerating group (attempt {})", attempt);
+            println!("Duplicate card ID detected, regenerating group (attempt {attempt})");
         }
     }
     
@@ -401,7 +407,7 @@ impl CardManagement {
             CardInfo {
                 card_id: card_id_str,
                 card_data: card_with_id.card.iter().map(|row| {
-                    row.iter().map(|cell| *cell).collect()
+                    row.to_vec()
                 }).collect(),
             }
         }).collect()
@@ -422,7 +428,7 @@ impl CardManagement {
         CardInfo {
             card_id,
             card_data: card.iter().map(|row| {
-                row.iter().map(|cell| *cell).collect()
+                row.to_vec()
             }).collect(),
         }
     }
@@ -448,7 +454,7 @@ impl CardManagement {
             let card_info = CardInfo {
                 card_id: card_id_str,
                 card_data: card_with_id.card.iter().map(|row| {
-                    row.iter().map(|cell| *cell).collect()
+                    row.to_vec()
                 }).collect(),
             };
             card_infos.push(card_info);
@@ -482,7 +488,7 @@ impl CardManagement {
             let card_info = CardInfo {
                 card_id: card_id_str,
                 card_data: card_with_id.card.iter().map(|row| {
-                    row.iter().map(|cell| *cell).collect()
+                    row.to_vec()
                 }).collect(),
             };
             card_infos.push(card_info);
@@ -497,6 +503,12 @@ impl CardManagement {
 pub struct CardAssignmentManager {
     assignments: HashMap<String, CardAssignment>,
     client_cards: HashMap<String, Vec<String>>,
+}
+
+impl Default for CardAssignmentManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CardAssignmentManager {
