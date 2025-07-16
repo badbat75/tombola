@@ -26,8 +26,8 @@ struct BoardResponse {
 }
 
 
-#[derive(serde::Serialize, serde::Deserialize)]
-struct ScorecardResponse {
+#[derive(serde::Serialize)]
+struct ScoremapResponse {
     scorecard: Number,
     score_map: HashMap<Number, Vec<String>>,
 }
@@ -148,8 +148,8 @@ async fn handle_request(
         (&Method::GET, "/pouch") => {
             handle_pouch(pouch_ref).await
         }
-        (&Method::GET, "/scorecard") => {
-            handle_scorecard(scorecard_ref).await
+        (&Method::GET, "/scoremap") => {
+            handle_scoremap(scorecard_ref).await
         }
         (&Method::GET, "/status") => {
             handle_status(board_ref, scorecard_ref).await
@@ -281,7 +281,7 @@ fn get_board_length(board_ref: &Arc<Mutex<Board>>) -> usize {
 // Function to get the scorecard value from the scorecard
 fn get_scorecard_from_scorecard(scorecard_ref: &Arc<Mutex<ScoreCard>>) -> Number {
     if let Ok(scorecard) = scorecard_ref.lock() {
-        scorecard.get_scorecard()
+        scorecard.scorecard
     } else {
         0
     }
@@ -706,15 +706,15 @@ async fn handle_pouch(pouch_ref: Arc<Mutex<Pouch>>) -> Response<Full<Bytes>> {
         .unwrap()
 }
 
-// Handle scorecard endpoint
-async fn handle_scorecard(scorecard_ref: Arc<Mutex<ScoreCard>>) -> Response<Full<Bytes>> {
+// Handle scoremap endpoint
+async fn handle_scoremap(scorecard_ref: Arc<Mutex<ScoreCard>>) -> Response<Full<Bytes>> {
     let scorecard_val = get_scorecard_from_scorecard(&scorecard_ref);
     let score_map = if let Ok(scorecard) = scorecard_ref.lock() {
-        scorecard.score_map.clone()
+        scorecard.get_scoremap().clone()
     } else {
         HashMap::new()
     };
-    let response = ScorecardResponse { scorecard: scorecard_val, score_map };
+    let response = ScoremapResponse { scorecard: scorecard_val, score_map };
     let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
     Response::builder()
         .status(StatusCode::OK)

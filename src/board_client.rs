@@ -21,8 +21,9 @@ struct PouchResponse {
 }
 
 #[derive(Deserialize)]
-struct ScorecardResponse {
+struct ScoremapResponse {
     scorecard: Number,
+    score_map: std::collections::HashMap<Number, Vec<String>>,
 }
 
 // Client configuration
@@ -59,7 +60,7 @@ pub async fn run_client() -> Result<(), Box<dyn Error>> {
     // Retrieve scorecard data
     let scorecard_data = get_scoremap().await?;
     
-    terminal::show_on_terminal(&display_board, &pouch_data, scorecard_data);
+    terminal::show_on_terminal(&display_board, &pouch_data, &scorecard_data);
 
     println!("Client execution completed successfully.");
     
@@ -102,13 +103,24 @@ async fn get_pouch_data() -> Result<Vec<Number>, Box<dyn Error>> {
     }
 }
 
-async fn get_scorecard_data() -> Result<Number, Box<dyn Error>> {
-    let url = format!("{}/scorecard", SERVER_BASE_URL);
+async fn get_scoremap() -> Result<tombola::score::ScoreCard, Box<dyn Error>> {
+    let url = format!("{}/scoremap", SERVER_BASE_URL);
     let response = reqwest::get(&url).await?;
     
     if response.status().is_success() {
-        let scorecard_response: ScorecardResponse = response.json().await?;
-        Ok(scorecard_response.scorecard)
+        let scoremap_response: ScoremapResponse = response.json().await?;
+        // Create a ScoreCard from the response
+        let mut scorecard = tombola::score::ScoreCard::new();
+        
+        // Set the scorecard value from the response
+        scorecard.update_scorecard(scoremap_response.scorecard);
+        
+        // Update the score map
+        for (score_idx, card_ids) in scoremap_response.score_map {
+            scorecard.update_score_map(score_idx, card_ids);
+        }
+        
+        Ok(scorecard)
     } else {
         Err(format!("Server error: {}", response.status()).into())
     }

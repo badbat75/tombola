@@ -189,7 +189,7 @@ impl TombolaClient {
     pub async fn get_scorecard(&self) -> Result<u8, Box<dyn std::error::Error>> {
         self.ensure_registered()?;
         
-        let url = format!("{}/scorecard", self.server_url);
+        let url = format!("{}/scoremap", self.server_url);
         let response = self
             .http_client
             .get(&url)

@@ -217,20 +217,30 @@ Get the current pouch state (remaining numbers).
 - `pouch` contains all numbers that haven't been extracted yet
 - `remaining` is the count of numbers still in the pouch
 
-#### GET /scorecard
+#### GET /scoremap
 
-Get the current scorecard (last extracted number).
+Get the current scorecard and score map (prize tracking information).
 
 **Response:**
 ```json
 {
-  "scorecard": 74
+  "scorecard": 74,
+  "score_map": {
+    "2": ["A1B2C3D4E5F6G7H8"],
+    "3": ["A1B2C3D4E5F6G7H8", "0000000000000000"],
+    "5": ["0000000000000000"]
+  }
 }
 ```
 
 **Notes:**
-- Returns the most recently extracted number
-- Returns `0` if no numbers have been extracted yet
+- `scorecard`: The most recently extracted number (current score)
+- `score_map`: Map of score indices to arrays of card IDs that achieved those scores
+- Returns `scorecard: 0` if no numbers have been extracted yet
+- Each key in score_map represents a score level (2, 3, 4, 5 numbers in a line, or 15 for BINGO)
+- Values are arrays of card IDs that achieved that score level
+- Card ID "0000000000000000" represents the main board
+- Empty score_map `{}` if no scores have been recorded yet
 
 #### GET /status
 
@@ -310,6 +320,7 @@ curl http://127.0.0.1:3000/getassignedcard/card_id_1 \
 curl http://127.0.0.1:3000/status
 curl http://127.0.0.1:3000/board
 curl http://127.0.0.1:3000/pouch
+curl http://127.0.0.1:3000/scoremap
 ```
 
 ## Rate Limiting

@@ -53,13 +53,13 @@ impl Board {
             return Vec::new();
         }
 
-        let available_previous = self.numbers.len() - 1;
-        let numbers_to_show = std::cmp::min(n, available_previous);
-        let start_index = self.numbers.len() - numbers_to_show - 1;
-        let end_index = self.numbers.len() - 1;
-
-        let mut result: Vec<Number> = self.numbers[start_index..end_index].to_vec();
-        result.reverse();
-        result
+        // Get the last n numbers excluding the current (last) number
+        let exclude_current = &self.numbers[..self.numbers.len() - 1];
+        exclude_current
+            .iter()
+            .rev()
+            .take(n)
+            .copied()
+            .collect()
     }
 }

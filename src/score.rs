@@ -20,10 +20,6 @@ impl ScoreCard {
         }
     }
 
-    pub fn get_scorecard(&self) -> Number {
-        self.scorecard
-    }
-
     pub fn get_scoremap(&self) -> &HashMap<Number, Vec<String>> {
         &self.score_map
     }
