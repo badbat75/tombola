@@ -4,24 +4,40 @@
 use crate::defs::{BOARDCONFIG, NUMBERSPERCARD, Number};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+use std::collections::HashMap;
+
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct ScoreCard {
-    scorecard: Number,
+    pub scorecard: Number,
+    pub score_map: HashMap<Number, Vec<String>>, // score_idx -> Vec<cardid>
 }
 
 impl ScoreCard {
     pub fn new() -> Self {
         ScoreCard {
             scorecard: 0,
+            score_map: HashMap::new(),
         }
     }
-    
+
     pub fn get_scorecard(&self) -> Number {
         self.scorecard
     }
-    
+
+    pub fn get_scoremap(&self) -> &HashMap<Number, Vec<String>> {
+        &self.score_map
+    }
+
     pub fn with_score(score: Number) -> Self {
-        ScoreCard { scorecard: score }
+        ScoreCard { scorecard: score, score_map: HashMap::new() }
+    }
+
+    pub fn update_scorecard(&mut self, score: Number) {
+        self.scorecard = score;
+    }
+
+    pub fn update_score_map(&mut self, score_idx: Number, card_ids: Vec<String>) {
+        self.score_map.insert(score_idx, card_ids);
     }
 
     pub fn allcards_calculate_score(&self, board_numbers: &[Number], card_assignments: &std::collections::HashMap<String, crate::card::CardAssignment>) -> (Number, Vec<(String, Vec<Number>)>) {

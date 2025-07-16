@@ -2,13 +2,11 @@
 // This module handles the Board implementation for the Tombola game.
 
 use crate::defs::Number;
-use crate::score::ScoreCard;
 use std::collections::HashSet;
 
 // This struct represents the board in the Tombola game.
 pub struct Board {
     numbers: Vec<Number>,
-    scorecard: ScoreCard,
     marked_numbers: HashSet<Number>,
 }
 
@@ -17,17 +15,12 @@ impl Board {
     pub fn new() -> Self {
         Board {
             numbers: Vec::new(),
-            scorecard: ScoreCard::new(),
             marked_numbers: HashSet::new(),
         }
     }
     
     pub fn push(&mut self, entry: Number) {
         self.numbers.push(entry);
-    }
-    
-    pub fn update_scorecard(&mut self, score: Number) {
-        self.scorecard = ScoreCard::with_score(score);
     }
     
     pub fn update_marked_numbers(&mut self, numbers_to_mark: Vec<Number>) {
@@ -39,20 +32,12 @@ impl Board {
         }
     }
     
-    pub fn get_scorecard_ref(&self) -> &ScoreCard {
-        &self.scorecard
-    }
-    
     pub fn get_numbers(&self) -> &Vec<Number> {
         &self.numbers
     }
     
     pub fn len(&self) -> usize {
         self.numbers.len()
-    }
-    
-    pub fn get_scorecard(&self) -> Number {
-        self.scorecard.get_scorecard()
     }
     
     pub fn get_sorted_entries(&self) -> Vec<(Number, bool)> {

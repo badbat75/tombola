@@ -20,6 +20,11 @@ struct PouchResponse {
     remaining: usize,
 }
 
+#[derive(Deserialize)]
+struct ScorecardResponse {
+    scorecard: Number,
+}
+
 // Client configuration
 const SERVER_BASE_URL: &str = "http://127.0.0.1:3000";
 
@@ -50,7 +55,11 @@ pub async fn run_client() -> Result<(), Box<dyn Error>> {
     
     // Retrieve pouch data
     let pouch_data = get_pouch_data().await?;
-    terminal::show_on_terminal(&display_board, &pouch_data);
+    
+    // Retrieve scorecard data
+    let scorecard_data = get_scoremap().await?;
+    
+    terminal::show_on_terminal(&display_board, &pouch_data, scorecard_data);
 
     println!("Client execution completed successfully.");
     
@@ -89,7 +98,19 @@ async fn get_pouch_data() -> Result<Vec<Number>, Box<dyn Error>> {
         println!("Server reports {} numbers remaining in pouch", pouch_response.remaining);
         Ok(pouch_response.pouch)
     } else {
-        Err(format!("Failed to get pouch data: {}", response.status()).into())
+        Err(format!("Server error: {}", response.status()).into())
+    }
+}
+
+async fn get_scorecard_data() -> Result<Number, Box<dyn Error>> {
+    let url = format!("{}/scorecard", SERVER_BASE_URL);
+    let response = reqwest::get(&url).await?;
+    
+    if response.status().is_success() {
+        let scorecard_response: ScorecardResponse = response.json().await?;
+        Ok(scorecard_response.scorecard)
+    } else {
+        Err(format!("Server error: {}", response.status()).into())
     }
 }
 

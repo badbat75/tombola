@@ -14,6 +14,7 @@ use serde_json::json;
 // Import Board from board module
 use crate::board::Board;
 use crate::pouch::Pouch;
+use crate::score::ScoreCard;
 use crate::defs::Number;
 use crate::client::{RegisterRequest, RegisterResponse, ClientInfoResponse, ClientInfo, ClientRegistry, generate_client_id};
 use crate::card::{CardAssignmentManager, GenerateCardsRequest, GenerateCardsResponse, CardInfo, ListAssignedCardsResponse, AssignedCardInfo};
@@ -24,9 +25,11 @@ struct BoardResponse {
     board: Vec<Number>,
 }
 
-#[derive(serde::Serialize)]
+
+#[derive(serde::Serialize, serde::Deserialize)]
 struct ScorecardResponse {
     scorecard: Number,
+    score_map: HashMap<Number, Vec<String>>,
 }
 
 #[derive(serde::Serialize)]
@@ -41,7 +44,7 @@ struct ErrorResponse {
 }
 
 // Start the HTTP server with Tokio
-pub fn start_server(board_ref: Arc<Mutex<Board>>, pouch_ref: Arc<Mutex<Pouch>>) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>, Arc<Mutex<CardAssignmentManager>>) {
+pub fn start_server(board_ref: Arc<Mutex<Board>>, pouch_ref: Arc<Mutex<Pouch>>, scorecard_ref: Arc<Mutex<ScoreCard>>) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>, Arc<Mutex<CardAssignmentManager>>) {
     let shutdown_signal = Arc::new(AtomicBool::new(false));
     let shutdown_clone = Arc::clone(&shutdown_signal);
     let client_registry: ClientRegistry = Arc::new(Mutex::new(HashMap::new()));
@@ -78,6 +81,7 @@ pub fn start_server(board_ref: Arc<Mutex<Board>>, pouch_ref: Arc<Mutex<Pouch>>) 
                 Ok(Ok((stream, _))) => {
                     let board_clone = Arc::clone(&board_ref);
                     let pouch_clone = Arc::clone(&pouch_ref);
+                    let scorecard_clone = Arc::clone(&scorecard_ref);
                     let registry_clone = Arc::clone(&client_registry);
                     let card_manager_clone = Arc::clone(&card_manager);
                     let io = TokioIo::new(stream);
@@ -85,7 +89,7 @@ pub fn start_server(board_ref: Arc<Mutex<Board>>, pouch_ref: Arc<Mutex<Pouch>>) 
                     // Spawn a task to handle the connection
                     tokio::spawn(async move {
                         let service = service_fn(move |req| {
-                            handle_request(req, Arc::clone(&board_clone), Arc::clone(&pouch_clone), registry_clone.clone(), Arc::clone(&card_manager_clone))
+                            handle_request(req, Arc::clone(&board_clone), Arc::clone(&pouch_clone), Arc::clone(&scorecard_clone), registry_clone.clone(), Arc::clone(&card_manager_clone))
                         });
                         
                         if let Err(err) = http1::Builder::new()
@@ -116,6 +120,7 @@ async fn handle_request(
     req: Request<hyper::body::Incoming>,
     board_ref: Arc<Mutex<Board>>,
     pouch_ref: Arc<Mutex<Pouch>>,
+    scorecard_ref: Arc<Mutex<ScoreCard>>,
     client_registry: ClientRegistry,
     card_manager: Arc<Mutex<CardAssignmentManager>>,
 ) -> Result<Response<Full<Bytes>>, Infallible> {
@@ -144,10 +149,10 @@ async fn handle_request(
             handle_pouch(pouch_ref).await
         }
         (&Method::GET, "/scorecard") => {
-            handle_scorecard(board_ref).await
+            handle_scorecard(scorecard_ref).await
         }
         (&Method::GET, "/status") => {
-            handle_status(board_ref).await
+            handle_status(board_ref, scorecard_ref).await
         }
         _ => {
             handle_not_found().await
@@ -273,10 +278,10 @@ fn get_board_length(board_ref: &Arc<Mutex<Board>>) -> usize {
     }
 }
 
-// Function to get the scorecard value from the board
-fn get_scorecard_from_board(board_ref: &Arc<Mutex<Board>>) -> Number {
-    if let Ok(board) = board_ref.lock() {
-        board.get_scorecard()
+// Function to get the scorecard value from the scorecard
+fn get_scorecard_from_scorecard(scorecard_ref: &Arc<Mutex<ScoreCard>>) -> Number {
+    if let Ok(scorecard) = scorecard_ref.lock() {
+        scorecard.get_scorecard()
     } else {
         0
     }
@@ -702,9 +707,14 @@ async fn handle_pouch(pouch_ref: Arc<Mutex<Pouch>>) -> Response<Full<Bytes>> {
 }
 
 // Handle scorecard endpoint
-async fn handle_scorecard(board_ref: Arc<Mutex<Board>>) -> Response<Full<Bytes>> {
-    let scorecard = get_scorecard_from_board(&board_ref);
-    let response = ScorecardResponse { scorecard };
+async fn handle_scorecard(scorecard_ref: Arc<Mutex<ScoreCard>>) -> Response<Full<Bytes>> {
+    let scorecard_val = get_scorecard_from_scorecard(&scorecard_ref);
+    let score_map = if let Ok(scorecard) = scorecard_ref.lock() {
+        scorecard.score_map.clone()
+    } else {
+        HashMap::new()
+    };
+    let response = ScorecardResponse { scorecard: scorecard_val, score_map };
     let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
     Response::builder()
         .status(StatusCode::OK)
@@ -715,9 +725,9 @@ async fn handle_scorecard(board_ref: Arc<Mutex<Board>>) -> Response<Full<Bytes>>
 }
 
 // Handle status endpoint
-async fn handle_status(board_ref: Arc<Mutex<Board>>) -> Response<Full<Bytes>> {
+async fn handle_status(board_ref: Arc<Mutex<Board>>, scorecard_ref: Arc<Mutex<ScoreCard>>) -> Response<Full<Bytes>> {
     let board_len = get_board_length(&board_ref);
-    let scorecard = get_scorecard_from_board(&board_ref);
+    let scorecard = get_scorecard_from_scorecard(&scorecard_ref);
     let response = json!({
         "status": "running",
         "numbers_extracted": board_len,

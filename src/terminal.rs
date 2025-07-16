@@ -55,8 +55,8 @@ pub fn print_board(board: &Board) {
     let sorted_entries = board.get_sorted_entries();
     let mut prev_num = 0;
     // Get the last extracted number from the board
-    let extracted = board.get_last_numbers(1).first().copied().unwrap_or(0);
-    
+    let extracted = board.get_numbers().last().copied().unwrap_or(0);
+
     for (curr_num, is_marked) in &sorted_entries {
         for _ in 0..downrightshift(prev_num, *curr_num).delta_y {
             println!();
@@ -83,25 +83,36 @@ pub fn print_last_numbers(board: &Board, n: usize) -> Vec<Number> {
 pub fn show_on_terminal(
     board: &Board,
     pouch: &[Number],
+    scorecard: &crate::score::ScoreCard,
 ) {
     // Get the last extracted number from the board
-    let extracted = board.get_last_numbers(1).first().copied().unwrap_or(0);
-    let scorecard = board.get_scorecard();
-    
+    let extracted = board.get_numbers().last().copied().unwrap_or(0);
+
     println!("Last number: {}{extracted}{}", Colors::green(), Colors::reset());
     println!("Previous numbers: {:?}", print_last_numbers(board, 3));
     println!("\nCurrent board:");
     print_board(board);
     println!();
 
-    // Mark numbers only if scorecard reaches a NEW goal
-    match scorecard {
-        2 => println!("\n{}TWO in line{}", Colors::yellow(), Colors::reset()),
-        3 => println!("\n{}THREE in line{}", Colors::yellow(), Colors::reset()),
-        4 => println!("\n{}FOUR in line{}", Colors::yellow(), Colors::reset()),
-        5 => println!("\n{}FIVE in line{}", Colors::yellow(), Colors::reset()),
-        x if x == NUMBERSPERCARD => println!("\n{}BINGO!!!{}", Colors::yellow(), Colors::reset()),
-        _ => {}
+
+    // Print scorecard (score_idx, [cardid1, cardid2, ...]) in reverse order
+    if scorecard.scorecard >= 2 {
+        println!();
+        println!("ScoreCard achievements:");
+        let mut achievements: Vec<_> = scorecard.score_map.iter().collect();
+        achievements.sort_by(|a, b| b.0.cmp(a.0)); // Sort descending by score_idx
+        for (score_idx, card_ids) in achievements {
+            // Mark numbers only if scorecard reaches a NEW goal
+            match score_idx {
+                2 => print!("{}TWO in line{}", Colors::yellow(), Colors::reset()),
+                3 => print!("{}THREE in line{}", Colors::yellow(), Colors::reset()),
+                4 => print!("{}FOUR in line{}", Colors::yellow(), Colors::reset()),
+                5 => print!("{}FIVE in line{}", Colors::yellow(), Colors::reset()),
+                x if *x == NUMBERSPERCARD => print!("{}BINGO!!!{}", Colors::yellow(), Colors::reset()),
+                _ => {} // Handle all other cases (do nothing)
+            }
+            println!(" -> CardIDs {:?}", card_ids);
+        }
     }
 
     if ! pouch.is_empty() { 

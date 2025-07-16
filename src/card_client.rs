@@ -1,3 +1,5 @@
+use tombola::defs::{NUMBERSPERCARD};
+
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
@@ -27,6 +29,7 @@ struct BoardResponse {
 #[derive(Debug, Deserialize)]
 struct ScorecardResponse {
     scorecard: u8,
+    score_map: std::collections::HashMap<u8, Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -353,18 +356,17 @@ impl TombolaClient {
 }
 
 // Example usage and main function for testing
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
     println!("🚀 Tombola Client Starting...");
-    
+
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
     let client_name = args.get(1).unwrap_or(&"TestClient".to_string()).clone();
-    let server_url = args.get(2).unwrap_or(&"http://127.0.0.1:3000".to_string()).clone();
-    
+    let server_url = "http://localhost:3000".to_string();
+
     // Create and register client
     let mut client = TombolaClient::new(&client_name, &server_url);
-    
+
     // Check for --nocard option
     if let Some(nocard_pos) = args.iter().position(|arg| arg == "--nocard") {
         if let Some(nocard_value) = args.get(nocard_pos + 1) {
@@ -383,41 +385,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             client.set_nocard(1);
         }
     }
-    
+
+    // Create a tokio runtime for async operations
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            println!("❌ Failed to create Tokio runtime: {}", e);
+            std::process::exit(1);
+        }
+    };
+
     // Register with server
-    match client.register().await {
+    let registration_result = rt.block_on(client.register());
+    match registration_result {
         Ok(()) => {
             println!("✅ Client registered successfully!");
-            
+
             // Get assigned cards info once
-            let assigned_cards = match client.list_assigned_cards().await {
+            let assigned_cards = match rt.block_on(client.list_assigned_cards()) {
                 Ok(response) => response.cards,
                 Err(e) => {
                     println!("❌ Failed to list assigned cards: {}", e);
                     std::process::exit(1);
                 }
             };
-            
+
             if assigned_cards.is_empty() {
                 println!("No cards assigned to this client.");
-                return Ok(());
+                return;
             }
-            
+
             println!("\n� Starting live monitoring (updating every 2 seconds)...");
             println!("�📇 Your Cards ({} total)", assigned_cards.len());
             println!("💡 Numbers highlighted in \x1b[1;33myellow\x1b[0m have been extracted from the pouch");
             println!("🛑 Press Ctrl+C to stop monitoring\n");
-            
+
             // Main monitoring loop
             loop {
                 // Clear screen for better readability
                 print!("\x1b[2J\x1b[1;1H");
-                
+
                 // Show timestamp
                 println!("🕐 Last update: {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"));
-                
+
                 // Get the current board (extracted numbers) from the server
-                let extracted_numbers = match client.get_board().await {
+                let extracted_numbers = match rt.block_on(client.get_board()) {
                     Ok(board) => {
                         if !board.is_empty() {
                             println!("🎯 Extracted numbers ({}): {:?}", board.len(), board);
@@ -431,9 +443,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Vec::new()
                     }
                 };
-                
+
                 // Get the current scorecard from the server
-                let scorecard = match client.get_scorecard().await {
+                let scorecard = match rt.block_on(client.get_scorecard()) {
                     Ok(scorecard) => {
                         if scorecard > 0 {
                             println!("📊 Current scorecard: {} (achievements shown only if scorecard < achievement level)", scorecard);
@@ -447,14 +459,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         0 // Default to 0 if we can't get scorecard
                     }
                 };
-                
+
                 println!("\n📇 Your Cards ({} total):", assigned_cards.len());
-                
+
                 let mut bingo_cards = Vec::new();
                 let mut line_achievements = Vec::new();
-                
+
                 for (index, card) in assigned_cards.iter().enumerate() {
-                    match client.get_assigned_card(&card.card_id).await {
+                    match rt.block_on(client.get_assigned_card(&card.card_id)) {
                         Ok(card_info) => {
                             let (is_bingo, card_lines) = print_card_as_table_with_highlights(index + 1, &card_info.card_id, &card_info.card_data, &extracted_numbers, scorecard);
                             if is_bingo {
@@ -469,7 +481,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                
+
                 // Show BINGO summary if any cards have BINGO
                 if !bingo_cards.is_empty() {
                     println!("\n🏆 \x1b[1;32mCONGRATULATIONS! You have {} BINGO card(s)!\x1b[0m 🏆", bingo_cards.len());
@@ -477,51 +489,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!("   🎉 BINGO with Card ID: {}", card_id);
                     }
                 }
-                
-                // Show line achievements summary
-                if !line_achievements.is_empty() {
-                    println!("\n📋 Line Achievements Summary:");
-                    let mut total_lines = 0;
-                    let mut five_in_line = 0;
-                    let mut four_in_line = 0;
-                    let mut three_in_line = 0;
-                    let mut two_in_line = 0;
-                    
-                    for (card_id, lines) in &line_achievements {
-                        println!("   Card {}: {} achievement(s)", card_id, lines.len());
-                        for line in lines {
-                            println!("      • {}", line);
-                            total_lines += 1;
-                            if line.contains("5 in line") {
-                                five_in_line += 1;
-                            } else if line.contains("4 in line") {
-                                four_in_line += 1;
-                            } else if line.contains("3 in line") {
-                                three_in_line += 1;
-                            } else if line.contains("2 in line") {
-                                two_in_line += 1;
-                            }
-                        }
-                    }
-                    
-                    println!("\n📊 Total Line Statistics:");
-                    if five_in_line > 0 {
-                        println!("   🎯 5 in line: {}", five_in_line);
-                    }
-                    if four_in_line > 0 {
-                        println!("   🎪 4 in line: {}", four_in_line);
-                    }
-                    if three_in_line > 0 {
-                        println!("   🎭 3 in line: {}", three_in_line);
-                    }
-                    if two_in_line > 0 {
-                        println!("   🎨 2 in line: {}", two_in_line);
-                    }
-                    println!("   📈 Total achievements: {}", total_lines);
-                }
-                
+
+                if scorecard == NUMBERSPERCARD { return; } // Exit if BINGO achieved;
+
                 // Wait for 2 seconds before next update
-                sleep(Duration::from_secs(2)).await;
+                std::thread::sleep(Duration::from_secs(2));
             }
         }
         Err(e) => {
@@ -529,8 +501,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(1);
         }
     }
-    
-    Ok(())
 }
 
 fn print_card_as_table_with_highlights(card_number: usize, card_id: &str, card_data: &Vec<Vec<Option<u8>>>, extracted_numbers: &Vec<u8>, scorecard: u8) -> (bool, Vec<String>) {
@@ -564,12 +534,12 @@ fn print_card_as_table_with_highlights(card_number: usize, card_id: &str, card_d
                     all_card_numbers.push(*number);
                     row_total_count += 1;
                     if extracted_numbers.contains(number) {
-                        // Bold yellow text using ANSI escape codes
-                        print!("\x1b[1;33m   {:2}   \x1b[0m│", number);
+                        // Bold green text using Colors::green() and Colors::reset()
+                        print!("{}   {:2}   {}|", tombola::defs::Colors::green(), number, tombola::defs::Colors::reset());
                         extracted_count += 1;
                         row_extracted_count += 1;
                     } else {
-                        print!("   {:2}   │", number);
+                        print!("   {:2}   |", number);
                     }
                 }
                 None => print!("        │"),
