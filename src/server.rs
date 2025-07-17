@@ -29,13 +29,16 @@ struct ErrorResponse {
 }
 
 // Start the HTTP server with Tokio
-pub fn start_server(board_ref: Arc<Mutex<Board>>, pouch_ref: Arc<Mutex<Pouch>>, scorecard_ref: Arc<Mutex<ScoreCard>>, config: ServerConfig) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>, Arc<Mutex<CardAssignmentManager>>) {
+pub fn start_server(config: ServerConfig) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>) {
     let shutdown_signal = Arc::new(AtomicBool::new(false));
     let shutdown_clone = Arc::clone(&shutdown_signal);
+    
+    // Create all server state components here
+    let board_ref = Arc::new(Mutex::new(Board::new()));
+    let pouch_ref = Arc::new(Mutex::new(Pouch::new()));
+    let scorecard_ref = Arc::new(Mutex::new(ScoreCard::new()));
     let client_registry = Arc::new(Mutex::new(ClientRegistry::new()));
     let card_manager: Arc<Mutex<CardAssignmentManager>> = Arc::new(Mutex::new(CardAssignmentManager::new()));
-    
-    let card_manager_clone = Arc::clone(&card_manager);
     
     let handle = tokio::spawn(async move {
         let addr = SocketAddr::from((config.host.parse::<std::net::IpAddr>().unwrap_or([127, 0, 0, 1].into()), config.port));
@@ -94,7 +97,7 @@ pub fn start_server(board_ref: Arc<Mutex<Board>>, pouch_ref: Arc<Mutex<Pouch>>, 
         println!("API Server shutting down...");
     });
 
-    (handle, shutdown_signal, card_manager_clone)
+    (handle, shutdown_signal)
 }
 
 // Handle HTTP requests asynchronously

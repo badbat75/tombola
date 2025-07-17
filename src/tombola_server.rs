@@ -1,12 +1,7 @@
 // src/main.rs
 // This is the main entry point for the Tombola game.
 
-use std::sync::{Arc, Mutex};
-
 use tombola::server;
-use tombola::pouch::Pouch;
-use tombola::board::Board;
-use tombola::score::ScoreCard;
 use tombola::config::ServerConfig;
 
 // Function to wait for a key press and return true if ESC is pressed, false otherwise
@@ -15,17 +10,8 @@ async fn main() {
     // Load server configuration
     let config = ServerConfig::load_or_default();
     
-    // Initialize and fill the pouch
-    let pouch_ref = Arc::new(Mutex::new(Pouch::new()));
-
-    // Create shared reference to the board (single source of truth)
-    let board_ref = Arc::new(Mutex::new(Board::new()));
-    
-    // Create a separate scorecard instance
-    let scorecard_ref = Arc::new(Mutex::new(ScoreCard::new()));
-    
-    // Start the API server in the background with the board reference
-    let (server_handle, _shutdown_signal, _card_manager) = server::start_server(Arc::clone(&board_ref), Arc::clone(&pouch_ref), Arc::clone(&scorecard_ref), config.clone());
+    // Start the API server with all components created internally
+    let (server_handle, _shutdown_signal) = server::start_server(config.clone());
 
     println!("🎯 Tombola Game Server Started");
     println!("📡 API Server running on http://{}:{}", config.host, config.port);
