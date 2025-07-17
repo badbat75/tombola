@@ -20,8 +20,8 @@ use crate::extraction::perform_extraction;
 /// and ensures proper mutex coordination to prevent deadlocks.
 #[derive(Clone)]
 pub struct Game {
-    id: String,
-    created_at: SystemTime,
+    id: Arc<Mutex<String>>,
+    created_at: Arc<Mutex<SystemTime>>,
     board: Arc<Mutex<Board>>,
     pouch: Arc<Mutex<Pouch>>,
     scorecard: Arc<Mutex<ScoreCard>>,
@@ -37,8 +37,8 @@ impl Game {
         let game_id = format!("game_{:08x}", rng.random::<u32>());
         
         Self {
-            id: game_id,
-            created_at: SystemTime::now(),
+            id: Arc::new(Mutex::new(game_id)),
+            created_at: Arc::new(Mutex::new(SystemTime::now())),
             board: Arc::new(Mutex::new(Board::new())),
             pouch: Arc::new(Mutex::new(Pouch::new())),
             scorecard: Arc::new(Mutex::new(ScoreCard::new())),
@@ -48,18 +48,19 @@ impl Game {
     }
 
     /// Get the game ID
-    pub fn id(&self) -> &str {
-        &self.id
+    pub fn id(&self) -> String {
+        self.id.lock().unwrap().clone()
     }
 
     /// Get the game creation time
     pub fn created_at(&self) -> SystemTime {
-        self.created_at
+        *self.created_at.lock().unwrap()
     }
 
     /// Get a human-readable creation time string
     pub fn created_at_string(&self) -> String {
-        match self.created_at.duration_since(std::time::UNIX_EPOCH) {
+        let created_at = *self.created_at.lock().unwrap();
+        match created_at.duration_since(std::time::UNIX_EPOCH) {
             Ok(duration) => {
                 let datetime: DateTime<Utc> = DateTime::from_timestamp(duration.as_secs() as i64, 0)
                     .unwrap_or_else(|| Utc::now());
@@ -99,6 +100,25 @@ impl Game {
     pub fn reset_game(&self) -> Result<Vec<String>, Vec<String>> {
         let mut reset_components = Vec::new();
         let mut errors = Vec::new();
+
+        // Generate new game ID and creation time for the fresh game
+        let mut rng = rand::rng();
+        let new_id = format!("game_{:08x}", rng.random::<u32>());
+        
+        // Update game ID and creation time
+        if let Ok(mut id_lock) = self.id.lock() {
+            *id_lock = new_id.clone();
+        } else {
+            errors.push("Failed to lock game ID for reset".to_string());
+        }
+        
+        if let Ok(mut created_at_lock) = self.created_at.lock() {
+            *created_at_lock = SystemTime::now();
+        } else {
+            errors.push("Failed to lock creation time for reset".to_string());
+        }
+        
+        reset_components.push(format!("New game ID generated: {}", new_id));
 
         // Reset all game structures in coordinated order to prevent deadlocks
         // Follow the mutex acquisition order: pouch -> board -> scorecard -> card_manager -> client_registry
@@ -248,9 +268,8 @@ impl Game {
             Err(e) => return Err(format!("Failed to create serializable state: {}", e)),
         };
 
-        // Create the filename with game ID and timestamp
-        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
-        let filename = format!("{}_{}.json", self.id(), timestamp);
+        // Create the filename with game ID
+        let filename = format!("{}.json", self.id(),);
         let filepath = Path::new("data/games").join(&filename);
 
         // Ensure the directory exists
@@ -315,8 +334,8 @@ impl Game {
         };
 
         Ok(SerializableGameState {
-            id: self.id.clone(),
-            created_at: self.created_at,
+            id: self.id(),
+            created_at: self.created_at(),
             board,
             pouch,
             scorecard,
@@ -382,8 +401,9 @@ mod tests {
     #[test]
     fn test_game_reset() {
         let game = Game::new();
+        let original_id = game.id();
         
-        // Test that reset works properly
+        // Test that reset works properly and generates new game ID
         let result = game.reset_game();
         assert!(result.is_ok());
         
@@ -393,6 +413,11 @@ mod tests {
         assert!(reset_components.contains(&"Score card reset".to_string()));
         assert!(reset_components.contains(&"Card assignments cleared".to_string()));
         assert!(reset_components.contains(&"Client registry cleared".to_string()));
+        
+        // Verify that a new game ID was generated
+        assert_ne!(game.id(), original_id);
+        assert!(game.id().starts_with("game_"));
+        assert!(reset_components.iter().any(|s| s.starts_with("New game ID generated:")));
     }
 
     #[test]
