@@ -1,4 +1,5 @@
 use crate::defs::{Number, FIRSTNUMBER, LASTNUMBER, CARDSNUMBER, BOARDCONFIG};
+use crate::client::ClientRegistry;
 
 use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
@@ -565,5 +566,23 @@ impl CardAssignmentManager {
                 }).collect()
             })
             .unwrap_or_default()
+    }
+
+    // Helper function to get client name from card ID
+    pub fn get_client_name_for_card(&self, card_id: &str, client_registry: &ClientRegistry) -> String {
+        if card_id == "0000000000000000" {
+            return "Board".to_string();
+        }
+        
+        if let Some(assignment) = self.get_card_assignment(card_id) {
+            if let Ok(registry) = client_registry.lock() {
+                for client_info in registry.values() {
+                    if client_info.id == assignment.client_id {
+                        return client_info.name.clone();
+                    }
+                }
+            }
+        }
+        "Unknown".to_string()
     }
 }

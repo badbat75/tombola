@@ -135,7 +135,7 @@ async fn handle_request(
             handle_scoremap(scorecard_ref).await
         }
         (&Method::POST, "/extract") => {
-            handle_extract(req, board_ref, pouch_ref, scorecard_ref, card_manager).await
+            handle_extract(req, board_ref, pouch_ref, scorecard_ref, card_manager, client_registry).await
         }
         (&Method::POST, "/newgame") => {
             handle_newgame(req, board_ref, pouch_ref, scorecard_ref, card_manager).await
@@ -730,6 +730,7 @@ async fn handle_extract(
     pouch_ref: Arc<Mutex<Pouch>>,
     scorecard_ref: Arc<Mutex<ScoreCard>>,
     card_manager: Arc<Mutex<CardAssignmentManager>>,
+    registry: ClientRegistry,
 ) -> Response<Full<Bytes>> {
     // Get client ID from headers for authentication
     let client_id = match req.headers().get("X-Client-ID") {
@@ -795,7 +796,7 @@ async fn handle_extract(
     }
 
     // Extract a number using the shared extraction logic
-    match perform_extraction(&pouch_ref, &board_ref, &scorecard_ref, &card_manager, 0) {
+    match perform_extraction(&pouch_ref, &board_ref, &scorecard_ref, &card_manager, &registry, 0) {
         Ok((extracted_number, _new_working_score)) => {
             // Get current pouch and board state for response
             let numbers_remaining = if let Ok(pouch) = pouch_ref.lock() {

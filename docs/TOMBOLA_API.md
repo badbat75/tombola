@@ -232,22 +232,26 @@ Get the current scorecard and score map (prize tracking information).
   "score_map": {
     "2": [
       {
+        "client_name": "Alice",
         "card_id": "A1B2C3D4E5F6G7H8",
         "numbers": [15, 23]
       }
     ],
     "3": [
       {
+        "client_name": "Alice",
         "card_id": "A1B2C3D4E5F6G7H8", 
         "numbers": [15, 23, 37]
       },
       {
+        "client_name": "Board",
         "card_id": "0000000000000000",
         "numbers": [15, 23, 37]
       }
     ],
     "5": [
       {
+        "client_name": "Board",
         "card_id": "0000000000000000",
         "numbers": [15, 23, 37, 41, 52]
       }
@@ -261,6 +265,7 @@ Get the current scorecard and score map (prize tracking information).
 - `published_score`: The highest score achieved so far (current published achievement level)
 - `score_map`: Map of score indices to arrays of ScoreAchievement objects
 - Each ScoreAchievement contains:
+  - `client_name`: The name of the client who achieved the score (or "Board" for board achievements)
   - `card_id`: The ID of the card that achieved the score (or "0000000000000000" for board achievements)
   - `numbers`: Array of specific numbers that contributed to achieving that score level
 - Returns `published_score: 0` if no achievements have been recorded yet

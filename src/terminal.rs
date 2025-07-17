@@ -112,14 +112,14 @@ pub fn show_on_terminal(
                 _ => {} // Handle all other cases (do nothing)
             }
             
-            // Display card IDs and their contributing numbers
+            // Display card IDs with client names and their contributing numbers
             print!(" -> ");
             for (i, achievement) in score_achievements.iter().enumerate() {
                 if i > 0 { print!(", "); }
                 if achievement.numbers.is_empty() {
-                    print!("Card {} (no numbers)", achievement.card_id);
+                    print!("{} [{}] (no numbers)", achievement.client_name, achievement.card_id);
                 } else {
-                    print!("Card {} (numbers: {:?})", achievement.card_id, achievement.numbers);
+                    print!("{} [{}] (numbers: {:?})", achievement.client_name, achievement.card_id, achievement.numbers);
                 }
             }
             println!();

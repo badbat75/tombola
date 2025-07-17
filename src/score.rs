@@ -4,12 +4,14 @@
 use crate::defs::{BOARDCONFIG, NUMBERSPERCARD, Number};
 use crate::board::Board;
 use crate::card::CardAssignmentManager;
+use crate::client::ClientRegistry;
 use serde::{Deserialize, Serialize};
 
 use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct ScoreAchievement {
+    pub client_name: String,
     pub card_id: String,
     pub numbers: Vec<Number>,
 }
@@ -302,6 +304,7 @@ impl ScoreCard {
         &mut self, 
         board: &Board, 
         card_manager: &CardAssignmentManager,
+        client_registry: &ClientRegistry,
         current_working_score: Number
     ) -> Number {
         // Get board numbers internally
@@ -332,6 +335,7 @@ impl ScoreCard {
                             .filter(|(_, numbers)| numbers.len() as Number == NUMBERSPERCARD)
                             .map(|(card_id, numbers)| {
                                 ScoreAchievement {
+                                    client_name: card_manager.get_client_name_for_card(card_id, client_registry),
                                     card_id: card_id.clone(),
                                     numbers: numbers.clone(),
                                 }
@@ -339,6 +343,7 @@ impl ScoreCard {
                     } else if boardscore_value == NUMBERSPERCARD {
                         // Board achieved BINGO
                         vec![ScoreAchievement {
+                            client_name: card_manager.get_client_name_for_card("0000000000000000", client_registry),
                             card_id: "0000000000000000".to_string(),
                             numbers: board_numbers_contributing.clone(),
                         }]
@@ -364,6 +369,7 @@ impl ScoreCard {
                                         .filter(|(_, numbers)| numbers.len() as Number == achievement_level)
                                         .map(|(card_id, numbers)| {
                                             ScoreAchievement {
+                                                client_name: card_manager.get_client_name_for_card(card_id, client_registry),
                                                 card_id: card_id.clone(),
                                                 numbers: numbers.clone(),
                                             }
@@ -372,6 +378,7 @@ impl ScoreCard {
                                     // If board score also meets this level, include it
                                     if boardscore_value == achievement_level {
                                         achievements.push(ScoreAchievement {
+                                            client_name: card_manager.get_client_name_for_card("0000000000000000", client_registry),
                                             card_id: "0000000000000000".to_string(),
                                             numbers: board_numbers_contributing.clone(),
                                         });
@@ -380,6 +387,7 @@ impl ScoreCard {
                                 } else if boardscore_value == achievement_level {
                                     // Only board achievement
                                     vec![ScoreAchievement {
+                                        client_name: card_manager.get_client_name_for_card("0000000000000000", client_registry),
                                         card_id: "0000000000000000".to_string(),
                                         numbers: board_numbers_contributing.clone(),
                                     }]
@@ -400,6 +408,7 @@ impl ScoreCard {
                                             .copied()
                                             .collect();
                                         level_achievements.push(ScoreAchievement {
+                                            client_name: card_manager.get_client_name_for_card(card_id, client_registry),
                                             card_id: card_id.clone(),
                                             numbers: level_numbers,
                                         });
@@ -414,6 +423,7 @@ impl ScoreCard {
                                         .copied()
                                         .collect();
                                     level_achievements.push(ScoreAchievement {
+                                        client_name: card_manager.get_client_name_for_card("0000000000000000", client_registry),
                                         card_id: "0000000000000000".to_string(),
                                         numbers: level_numbers,
                                     });
