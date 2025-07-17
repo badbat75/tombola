@@ -18,6 +18,7 @@ use crate::defs::Number;
 use crate::client::{RegisterRequest, RegisterResponse, ClientInfoResponse, ClientInfo, ClientRegistry};
 use crate::card::{CardAssignmentManager, GenerateCardsRequest, GenerateCardsResponse, CardInfo, ListAssignedCardsResponse, AssignedCardInfo};
 use crate::config::ServerConfig;
+use crate::logging::{log_info, log_error_stderr, log_warning};
 
 // Import the extraction function from extraction module
 use crate::extraction::perform_extraction;
@@ -45,7 +46,7 @@ pub fn start_server(config: ServerConfig) -> (tokio::task::JoinHandle<()>, Arc<A
         let listener = match TcpListener::bind(&addr).await {
             Ok(listener) => listener,
             Err(e) => {
-                eprintln!("Failed to start API server: {e}");
+                log_error_stderr(&format!("Failed to start API server: {e}"));
                 return;
             }
         };
@@ -81,12 +82,12 @@ pub fn start_server(config: ServerConfig) -> (tokio::task::JoinHandle<()>, Arc<A
                             .serve_connection(io, service)
                             .await
                         {
-                            eprintln!("Error serving connection: {err:?}");
+                            log_error_stderr(&format!("Error serving connection: {err:?}"));
                         }
                     });
                 }
                 Ok(Err(e)) => {
-                    eprintln!("Error accepting connection: {e}");
+                    log_error_stderr(&format!("Error accepting connection: {e}"));
                     break;
                 }
                 Err(_) => {
@@ -94,7 +95,7 @@ pub fn start_server(config: ServerConfig) -> (tokio::task::JoinHandle<()>, Arc<A
                 }
             }
         }
-        println!("API Server shutting down...");
+        log_info("API Server shutting down...");
     });
 
     (handle, shutdown_signal)
@@ -222,19 +223,19 @@ async fn handle_register(
 
         // Store new client information (using name as key)
         registry.insert(register_request.name.clone(), client_info);
-        println!("✅ Client registered: {} (ID: {})", register_request.name, client_id);
+        log_info(&format!("Client registered: {} (ID: {})", register_request.name, client_id));
     }
 
     // Check if client requested cards during registration, default to 1 if not specified
     let card_count = register_request.nocard.unwrap_or(1);
-    println!("🎴 Generating {} cards for client '{}' during registration", card_count, register_request.name);
+    log_info(&format!("Generating {} cards for client '{}' during registration", card_count, register_request.name));
     
     // Generate the requested number of cards using the card manager
     if let Ok(mut manager) = card_manager.lock() {
         manager.assign_cards(client_id.clone(), card_count);
-        println!("✅ Generated and assigned {} cards to client '{}'", card_count, register_request.name);
+        log_info(&format!("Generated and assigned {} cards to client '{}'", card_count, register_request.name));
     } else {
-        println!("⚠️  Failed to acquire card manager lock for client '{}'", register_request.name);
+        log_warning(&format!("Failed to acquire card manager lock for client '{}'", register_request.name));
     }
 
     // Create response
@@ -505,7 +506,7 @@ async fn handle_generate_cards(
             .unwrap();
     };
 
-    println!("✅ Generated {} cards for client {}", card_infos.len(), client_id);
+    log_info(&format!("Generated {} cards for client {}", card_infos.len(), client_id));
 
     // Create response
     let response = GenerateCardsResponse {
@@ -1035,7 +1036,7 @@ async fn handle_newgame(
             .unwrap();
     }
 
-    println!("🔄 Game reset initiated via API by client {client_id}");
+    log_info(&format!("Game reset initiated via API by client {client_id}"));
 
     // Create success response
     let response = json!({
