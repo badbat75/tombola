@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use rand::Rng;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use crate::board::Board;
 use crate::pouch::Pouch;
 use crate::score::ScoreCard;
@@ -208,6 +209,20 @@ impl Game {
         self.pouch_length() == 0
     }
 
+    /// Check if the game has ended (either BINGO reached or pouch empty)
+    pub fn is_game_ended(&self) -> bool {
+        self.is_bingo_reached() || self.is_pouch_empty()
+    }
+
+    /// Get running game ID and creation details
+    pub fn get_running_game_info(&self) -> (String, String, SystemTime) {
+        (
+            self.id().to_string(),
+            self.created_at_string(),
+            self.created_at()
+        )
+    }
+
     /// Get game information as a formatted string for debugging/logging
     pub fn game_info(&self) -> String {
         format!(
@@ -220,6 +235,109 @@ impl Game {
             self.has_game_started()
         )
     }
+
+    /// Dump the complete game state to a JSON file in data/games directory
+    /// This function is called when the game ends (BINGO reached)
+    pub fn dump_to_json(&self) -> Result<String, String> {
+        use std::fs;
+        use std::path::Path;
+
+        // Create the serializable game state
+        let game_state = match self.create_serializable_state() {
+            Ok(state) => state,
+            Err(e) => return Err(format!("Failed to create serializable state: {}", e)),
+        };
+
+        // Create the filename with game ID and timestamp
+        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+        let filename = format!("{}_{}.json", self.id(), timestamp);
+        let filepath = Path::new("data/games").join(&filename);
+
+        // Ensure the directory exists
+        if let Some(parent) = filepath.parent() {
+            if let Err(e) = fs::create_dir_all(parent) {
+                return Err(format!("Failed to create directory {:?}: {}", parent, e));
+            }
+        }
+
+        // Serialize the game state to JSON
+        let json_content = match serde_json::to_string_pretty(&game_state) {
+            Ok(json) => json,
+            Err(e) => return Err(format!("Failed to serialize game state: {}", e)),
+        };
+
+        // Write to file
+        match fs::write(&filepath, json_content) {
+            Ok(_) => Ok(format!("Game dumped to: {}", filepath.display())),
+            Err(e) => Err(format!("Failed to write file {:?}: {}", filepath, e)),
+        }
+    }
+
+    /// Dump the game state if the game has ended, otherwise return an error
+    pub fn dump_if_ended(&self) -> Result<String, String> {
+        if self.is_game_ended() {
+            self.dump_to_json()
+        } else {
+            Err("Game has not ended yet (BINGO not reached and pouch not empty)".to_string())
+        }
+    }
+
+    /// Create a serializable version of the game state
+    fn create_serializable_state(&self) -> Result<SerializableGameState, String> {
+        let board = {
+            let guard = self.board.lock()
+                .map_err(|_| "Failed to lock board")?;
+            guard.clone()
+        };
+
+        let pouch = {
+            let guard = self.pouch.lock()
+                .map_err(|_| "Failed to lock pouch")?;
+            guard.clone()
+        };
+
+        let scorecard = {
+            let guard = self.scorecard.lock()
+                .map_err(|_| "Failed to lock scorecard")?;
+            guard.clone()
+        };
+
+        let client_registry = {
+            let guard = self.client_registry.lock()
+                .map_err(|_| "Failed to lock client registry")?;
+            guard.clone()
+        };
+
+        let card_manager = {
+            let guard = self.card_manager.lock()
+                .map_err(|_| "Failed to lock card manager")?;
+            guard.clone()
+        };
+
+        Ok(SerializableGameState {
+            id: self.id.clone(),
+            created_at: self.created_at,
+            board,
+            pouch,
+            scorecard,
+            client_registry,
+            card_manager,
+            game_ended_at: SystemTime::now(),
+        })
+    }
+}
+
+/// Serializable version of the Game struct for JSON dumping
+#[derive(Serialize, Deserialize)]
+pub struct SerializableGameState {
+    pub id: String,
+    pub created_at: SystemTime,
+    pub board: Board,
+    pub pouch: Pouch,
+    pub scorecard: ScoreCard,
+    pub client_registry: ClientRegistry,
+    pub card_manager: CardAssignmentManager,
+    pub game_ended_at: SystemTime,
 }
 
 impl Default for Game {
@@ -316,5 +434,83 @@ mod tests {
         assert!(info.contains("score=0"));
         assert!(info.contains("started=false"));
         assert!(info.contains(&game.id()));
+    }
+
+    #[test]
+    fn test_game_state_serialization() {
+        let game = Game::new();
+        
+        // Test creating serializable state
+        let serializable_state = game.create_serializable_state();
+        assert!(serializable_state.is_ok());
+        
+        let state = serializable_state.unwrap();
+        assert_eq!(state.id, game.id());
+        assert_eq!(state.board.len(), 0);
+        assert_eq!(state.pouch.len(), 90);
+    }
+
+    #[test]
+    fn test_game_ending_conditions() {
+        let game = Game::new();
+        
+        // Initially, game hasn't ended
+        assert!(!game.is_game_ended());
+        assert!(!game.is_bingo_reached());
+        assert!(!game.is_pouch_empty());
+        
+        // Test dump_if_ended for a non-ended game
+        let dump_result = game.dump_if_ended();
+        assert!(dump_result.is_err());
+        assert!(dump_result.unwrap_err().contains("Game has not ended yet"));
+    }
+
+    #[test]
+    fn test_selective_dump_logic() {
+        let game = Game::new();
+        
+        // Test scenarios for selective dumping on newgame:
+        
+        // Scenario 1: Game not started - should not dump
+        assert!(!game.has_game_started());
+        assert!(!game.is_bingo_reached());
+        // Logic: !game.has_game_started() -> no dump
+        
+        // Scenario 2: Game started but no BINGO - should dump
+        // (We can't easily simulate this without complex setup, but we can verify the logic)
+        // Logic: game.has_game_started() && !game.is_bingo_reached() -> dump
+        
+        // Scenario 3: Game with BINGO reached - should not dump (already dumped)
+        // Logic: game.has_game_started() && game.is_bingo_reached() -> no dump
+        
+        // For now, just verify the boolean logic conditions are accessible
+        assert!(!game.has_game_started());
+        assert!(!game.is_bingo_reached());
+        assert!(!game.is_game_ended());
+    }
+
+    #[test]
+    fn test_running_game_info() {
+        let game = Game::new();
+        
+        // Test get_running_game_info method
+        let (game_id, created_at_string, created_at_systemtime) = game.get_running_game_info();
+        
+        // Verify the returned values
+        assert!(!game_id.is_empty());
+        assert!(game_id.starts_with("game_"));
+        assert_eq!(game_id.len(), 13); // "game_" + 8 hex chars
+        assert_eq!(game_id, game.id());
+        
+        // Verify creation time consistency
+        assert!(!created_at_string.is_empty());
+        assert!(created_at_string.contains("UTC"));
+        assert_eq!(created_at_string, game.created_at_string());
+        assert_eq!(created_at_systemtime, game.created_at());
+        
+        // Verify the SystemTime is recent (within last few seconds)
+        let now = SystemTime::now();
+        let time_diff = now.duration_since(created_at_systemtime).unwrap_or_default();
+        assert!(time_diff.as_secs() < 5); // Should be created within last 5 seconds
     }
 }

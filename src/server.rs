@@ -17,7 +17,7 @@ use crate::score::ScoreCard;
 use crate::client::{RegisterRequest, RegisterResponse, ClientInfoResponse, ClientInfo};
 use crate::card::{GenerateCardsRequest, GenerateCardsResponse, CardInfo, ListAssignedCardsResponse, AssignedCardInfo};
 use crate::config::ServerConfig;
-use crate::logging::{log_info, log_error_stderr, log_warning};
+use crate::logging::{log_info, log_error, log_error_stderr, log_warning};
 use crate::game::Game;
 
 // Response structures for JSON serialization
@@ -133,8 +133,14 @@ async fn handle_request(
         (&Method::POST, "/newgame") => {
             handle_newgame(req, &game).await
         }
+        (&Method::POST, "/dumpgame") => {
+            handle_dumpgame(req, &game).await
+        }
         (&Method::GET, "/status") => {
             handle_status(&game).await
+        }
+        (&Method::GET, "/runninggameid") => {
+            handle_running_game_id(&game).await
         }
         _ => {
             handle_not_found().await
@@ -774,6 +780,28 @@ async fn handle_status(game: &Game) -> Response<Full<Bytes>> {
         .unwrap()
 }
 
+// Handle running game ID endpoint
+async fn handle_running_game_id(game: &Game) -> Response<Full<Bytes>> {
+    let (game_id, created_at_string, created_at_systemtime) = game.get_running_game_info();
+    let response = json!({
+        "game_id": game_id,
+        "created_at": created_at_string,
+        "created_at_timestamp": {
+            "secs_since_epoch": created_at_systemtime.duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default().as_secs(),
+            "nanos_since_epoch": created_at_systemtime.duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default().subsec_nanos()
+        }
+    });
+    let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/json")
+        .header("Access-Control-Allow-Origin", "*")
+        .body(Full::new(Bytes::from(body)))
+        .unwrap()
+}
+
 // Handle extract endpoint - performs number extraction
 async fn handle_extract(
     req: Request<hyper::body::Incoming>,
@@ -846,6 +874,18 @@ async fn handle_extract(
             // Get current pouch and board state for response using Game methods
             let numbers_remaining = game.pouch_length();
             let total_extracted = game.board_length();
+            
+            // Check if BINGO was reached after this extraction and dump game state if so
+            if game.is_bingo_reached() {
+                match game.dump_to_json() {
+                    Ok(dump_message) => {
+                        crate::logging::log_info(&format!("Game ended with BINGO! {}", dump_message));
+                    }
+                    Err(dump_error) => {
+                        crate::logging::log_error(&format!("Failed to dump game state: {}", dump_error));
+                    }
+                }
+            }
             
             // Create success response
             let response = json!({
@@ -938,6 +978,19 @@ async fn handle_newgame(
             .unwrap();
     }
 
+    // Dump the current game state only if the game has started but BINGO was not reached
+    // (BINGO games are already auto-dumped when BINGO occurs)
+    if game.has_game_started() && !game.is_bingo_reached() {
+        match game.dump_to_json() {
+            Ok(dump_message) => {
+                log_info(&format!("Incomplete game dumped before reset: {}", dump_message));
+            }
+            Err(dump_error) => {
+                log_error(&format!("Failed to dump incomplete game state before reset: {}", dump_error));
+            }
+        }
+    }
+
     // Use the Game struct's reset_game method which handles proper mutex coordination
     match game.reset_game() {
         Ok(reset_components) => {
@@ -961,6 +1014,94 @@ async fn handle_newgame(
             log_error_stderr(&format!("Game reset failed: {:?}", errors));
             let error_response = ErrorResponse {
                 error: format!("Failed to reset game: {}", errors.join(", ")),
+            };
+            let body = serde_json::to_string(&error_response).unwrap_or_else(|_| "{}".to_string());
+            Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .header("Content-Type", "application/json")
+                .header("Access-Control-Allow-Origin", "*")
+                .body(Full::new(Bytes::from(body)))
+                .unwrap()
+        }
+    }
+}
+
+// Handle dumpgame endpoint - dumps current game state to JSON file
+async fn handle_dumpgame(
+    req: Request<hyper::body::Incoming>,
+    game: &Game,
+) -> Response<Full<Bytes>> {
+    // Check for client authentication header
+    let client_id = match req.headers().get("X-Client-ID") {
+        Some(header_value) => {
+            match header_value.to_str() {
+                Ok(id) => id,
+                Err(_) => {
+                    let error_response = ErrorResponse {
+                        error: "Invalid X-Client-ID header".to_string(),
+                    };
+                    let body = serde_json::to_string(&error_response).unwrap_or_else(|_| "{}".to_string());
+                    return Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .header("Content-Type", "application/json")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(Full::new(Bytes::from(body)))
+                        .unwrap();
+                }
+            }
+        }
+        None => {
+            let error_response = ErrorResponse {
+                error: "Missing X-Client-ID header".to_string(),
+            };
+            let body = serde_json::to_string(&error_response).unwrap_or_else(|_| "{}".to_string());
+            return Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .header("Content-Type", "application/json")
+                .header("Access-Control-Allow-Origin", "*")
+                .body(Full::new(Bytes::from(body)))
+                .unwrap();
+        }
+    };
+
+    // Only allow board client (ID: "0000000000000000") to dump the game
+    if client_id != "0000000000000000" {
+        let error_response = ErrorResponse {
+            error: "Unauthorized: Only board client can dump the game".to_string(),
+        };
+        let body = serde_json::to_string(&error_response).unwrap_or_else(|_| "{}".to_string());
+        return Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .header("Content-Type", "application/json")
+            .header("Access-Control-Allow-Origin", "*")
+            .body(Full::new(Bytes::from(body)))
+            .unwrap();
+    }
+
+    // Dump the game state to JSON
+    match game.dump_to_json() {
+        Ok(dump_message) => {
+            log_info(&format!("Game manually dumped: {}", dump_message));
+            let response = json!({
+                "success": true,
+                "message": dump_message,
+                "game_id": game.id(),
+                "game_ended": game.is_game_ended(),
+                "bingo_reached": game.is_bingo_reached(),
+                "pouch_empty": game.is_pouch_empty()
+            });
+            let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "application/json")
+                .header("Access-Control-Allow-Origin", "*")
+                .body(Full::new(Bytes::from(body)))
+                .unwrap()
+        }
+        Err(dump_error) => {
+            log_error(&format!("Manual game dump failed: {}", dump_error));
+            let error_response = ErrorResponse {
+                error: format!("Failed to dump game: {}", dump_error),
             };
             let body = serde_json::to_string(&error_response).unwrap_or_else(|_| "{}".to_string());
             Response::builder()

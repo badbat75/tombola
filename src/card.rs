@@ -43,7 +43,7 @@ pub struct AssignedCardInfo {
 }
 
 // Card assignment storage
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CardAssignment {
     pub card_id: String,
     pub client_id: String,
@@ -500,7 +500,7 @@ impl CardManagement {
 }
 
 // Card assignment manager - handles all card assignment logic
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CardAssignmentManager {
     assignments: HashMap<String, CardAssignment>,
     client_cards: HashMap<String, Vec<String>>,

@@ -65,6 +65,15 @@ if let Ok(pouch) = pouch_ref.lock() {
 - Numbers range: 1-90 (calculated as `FIRSTNUMBER` to `LASTNUMBER`)
 - `Colors`: Terminal color definitions for UI formatting (Green, Yellow, Red, Blue, Magenta)
 
+### Game State Persistence (`src/game.rs`)
+- **Automatic JSON Dumps**: Complete game state is automatically dumped to `data/games/` directory when:
+  - BINGO is reached (game ends with score ≥ 15)
+  - New game is started via `/newgame` endpoint (dumps incomplete games only - BINGO games already saved)
+- **Manual Dumps**: Admin can trigger dumps via `/dumpgame` endpoint
+- **File Format**: `{game_id}_{timestamp}.json` with pretty-printed JSON
+- **Complete State**: Includes board, pouch, scorecard, client registry, and card assignments
+- **Security**: Only board client (ID: "0000000000000000") can trigger manual dumps
+
 ### Configuration Management (`src/config.rs`)
 - `ServerConfig`: Host/port configuration with defaults (127.0.0.1:3000)
 - `ClientConfig`: Client connection settings including timeouts and retry logic
@@ -149,6 +158,10 @@ cargo run --bin tombola-player
 - POST `/generatecards` - Generate new card sets
 - POST `/assigncard` - Assign cards to clients
 - GET `/listassignedcards` - View all assignments
+
+### Game Management
+- POST `/newgame` - Reset game state (auto-dumps current game if started)
+- POST `/dumpgame` - Manually dump current game state to JSON
 
 ## Testing & Debugging
 

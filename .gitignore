@@ -13,6 +13,9 @@ target
 # Contains mutation testing data
 **/mutants.out*/
 
+# Game data dumps - contains game state JSON files
+data/
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore

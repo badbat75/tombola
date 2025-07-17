@@ -26,7 +26,7 @@ pub struct ClientInfoResponse {
 }
 
 // Client information storage
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientInfo {
     pub id: String,
     pub name: String,
@@ -65,7 +65,7 @@ impl ClientInfo {
 }
 
 // Global client registry (keyed by client name)
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ClientRegistry {
     clients: HashMap<String, ClientInfo>,
 }

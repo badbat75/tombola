@@ -55,6 +55,42 @@ Common HTTP status codes:
 - `409 Conflict`: Resource already exists or conflict with current state
 - `500 Internal Server Error`: Server-side error
 
+## API Endpoints Index
+
+### Client Registry
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/register` | Register a new client |
+| `GET` | `/client/{client_name}` | Get client information by name |
+| `GET` | `/clientbyid/{client_id}` | Get client information by ID |
+
+### Card Management
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/generatecardsforme` | Generate cards for authenticated client |
+| `GET` | `/listassignedcards` | List all assigned cards |
+| `GET` | `/getassignedcard/{card_id}` | Get specific card by ID |
+
+### Board & Game State
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/board` | Get extracted numbers |
+| `GET` | `/pouch` | Get remaining numbers |
+| `GET` | `/status` | Get overall game status |
+| `POST` | `/extract` | Extract next number (board client only) |
+
+### Score Management
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/scoremap` | Get current scores and achievements |
+
+### Game Administration
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/runninggameid` | Get current game ID and creation time |
+| `POST` | `/newgame` | Reset game state (board client only) |
+| `POST` | `/dumpgame` | Dump game state to JSON (board client only) |
+
 ## Endpoints
 
 ### 1. Client Registration
@@ -453,6 +489,90 @@ curl -X POST http://127.0.0.1:3000/newgame \
 - Follows the coordinated mutex locking pattern to ensure thread safety
 - Server logs the game reset with client identification for audit purposes
 - All clients will need to re-register and obtain new card assignments after a game reset
+- **Selective Auto-Dump**: Before resetting, incomplete games (started but no BINGO) are automatically dumped to JSON file in `data/games/` directory. BINGO games are not re-dumped since they were already saved when BINGO occurred.
+
+#### POST /dumpgame
+
+Manually dump the current game state to a JSON file for analysis, auditing, or debugging.
+
+**Authentication Required:** Yes (X-Client-ID header must be "0000000000000000")
+
+**Authorization:** Only the board client with ID "0000000000000000" can dump game state.
+
+**Request:**
+```bash
+curl -X POST http://127.0.0.1:3000/dumpgame \
+  -H "X-Client-ID: 0000000000000000" \
+  -H "Content-Type: application/json"
+```
+
+**Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Game dumped to: data/games/game_87654321_20250717_143022.json",
+  "game_id": "game_87654321",
+  "game_ended": false,
+  "bingo_reached": false,
+  "pouch_empty": false
+}
+```
+
+**Error Response - Unauthorized Client (403 Forbidden):**
+```json
+{
+  "error": "Unauthorized: Only board client can dump the game"
+}
+```
+
+**Error Response - File System Error (500 Internal Server Error):**
+```json
+{
+  "error": "Failed to dump game: Failed to create directory \"data/games\": Permission denied"
+}
+```
+
+**Notes:**
+- Dumps complete game state including board, pouch, scorecard, client registry, and card assignments
+- Files are saved in `data/games/` directory with format: `{game_id}_{timestamp}.json`
+- Can be called at any time during the game, not just when the game has ended
+- **Automatic Dumps**: Game state is automatically dumped when BINGO is reached, and incomplete games (no BINGO) are dumped on newgame
+- Contains full game history and state for analysis, debugging, and audit purposes
+- JSON structure includes creation timestamp, end timestamp, and all game components
+- Files use pretty-printed JSON for human readability
+- Game dumps are append-only (no overwriting of existing files)
+
+#### GET /runninggameid
+
+Get the current running game ID and creation details.
+
+**Authentication Required:** No
+
+**Request:**
+```bash
+curl http://127.0.0.1:3000/runninggameid
+```
+
+**Success Response (200 OK):**
+```json
+{
+  "game_id": "game_87654321",
+  "created_at": "2025-07-17 14:35:12 UTC",
+  "created_at_timestamp": {
+    "secs_since_epoch": 1752767712,
+    "nanos_since_epoch": 345123000
+  }
+}
+```
+
+**Notes:**
+- Returns the unique identifier and creation details of the currently running game instance
+- `game_id`: 8-digit hexadecimal identifier for the current game (format: `game_12345678`)
+- `created_at`: Human-readable timestamp in UTC format
+- `created_at_timestamp`: SystemTime representation with seconds and nanoseconds since Unix epoch
+- Available to all clients without authentication
+- Useful for tracking game instances, logging, and client synchronization
+- Game ID changes when a new game is started via `/newgame` endpoint
 
 ## Card Structure
 
@@ -526,6 +646,7 @@ curl http://127.0.0.1:3000/getassignedcard/card_id_1 \
 5. **Check game state:**
 ```bash
 curl http://127.0.0.1:3000/status
+curl http://127.0.0.1:3000/runninggameid
 curl http://127.0.0.1:3000/board
 curl http://127.0.0.1:3000/pouch
 curl http://127.0.0.1:3000/scoremap
