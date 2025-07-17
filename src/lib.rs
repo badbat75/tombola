@@ -10,3 +10,4 @@ pub mod card;
 pub mod client;
 pub mod score;
 pub mod extraction;
+pub mod config;

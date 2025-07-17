@@ -18,6 +18,7 @@ use crate::score::ScoreCard;
 use crate::defs::Number;
 use crate::client::{RegisterRequest, RegisterResponse, ClientInfoResponse, ClientInfo, ClientRegistry, generate_client_id};
 use crate::card::{CardAssignmentManager, GenerateCardsRequest, GenerateCardsResponse, CardInfo, ListAssignedCardsResponse, AssignedCardInfo};
+use crate::config::ServerConfig;
 
 // Import the extraction function from extraction module
 use crate::extraction::perform_extraction;
@@ -29,7 +30,7 @@ struct ErrorResponse {
 }
 
 // Start the HTTP server with Tokio
-pub fn start_server(board_ref: Arc<Mutex<Board>>, pouch_ref: Arc<Mutex<Pouch>>, scorecard_ref: Arc<Mutex<ScoreCard>>) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>, Arc<Mutex<CardAssignmentManager>>) {
+pub fn start_server(board_ref: Arc<Mutex<Board>>, pouch_ref: Arc<Mutex<Pouch>>, scorecard_ref: Arc<Mutex<ScoreCard>>, config: ServerConfig) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>, Arc<Mutex<CardAssignmentManager>>) {
     let shutdown_signal = Arc::new(AtomicBool::new(false));
     let shutdown_clone = Arc::clone(&shutdown_signal);
     let client_registry: ClientRegistry = Arc::new(Mutex::new(HashMap::new()));
@@ -38,10 +39,10 @@ pub fn start_server(board_ref: Arc<Mutex<Board>>, pouch_ref: Arc<Mutex<Pouch>>, 
     let card_manager_clone = Arc::clone(&card_manager);
     
     let handle = tokio::spawn(async move {
-        let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+        let addr = SocketAddr::from((config.host.parse::<std::net::IpAddr>().unwrap_or([127, 0, 0, 1].into()), config.port));
         let listener = match TcpListener::bind(&addr).await {
             Ok(listener) => {
-                println!("API Server started on http://127.0.0.1:3000");
+                println!("API Server started on http://{}:{}", config.host, config.port);
                 listener
             }
             Err(e) => {

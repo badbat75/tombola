@@ -1,6 +1,6 @@
 [package]
 name = "tombola"
-version = "0.1.0"
+version = "0.8.0"
 edition = "2024"
 description = "A Rust-based tombola/bingo game"
 authors = ["Emiliano De Simoni <emiliano.desimoni@outlook.com>"]
@@ -9,25 +9,28 @@ repository = "https://github.com/badbat75/tombola"
 
 [dependencies]
 rand = "0"
-crossterm = "*"
-tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.11", features = ["json"] }
+crossterm = "0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
+reqwest = { version = "0", features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-hyper = { version = "1", features = ["full"] }
-hyper-util = { version = "0.1", features = ["full"] }
-http-body-util = "0.1"
-chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4.0", features = ["derive"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0", features = ["tokio"] }
+http-body-util = "0"
+chrono = "0"
+clap = { version = "4", features = ["derive"] }
+
+[profile.release]
+lto = true
 
 [[bin]]
 name = "tombola-server"
 path = "src/tombola_server.rs"
 
 [[bin]]
-name = "board_client"
-path = "src/board_client.rs"
+name = "tombola-client"
+path = "src/tombola_client.rs"
 
 [[bin]]
-name = "card_client"
+name = "tombola-player"
 path = "src/card_client.rs"

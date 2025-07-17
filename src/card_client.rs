@@ -2,6 +2,7 @@ use tombola::defs::{NUMBERSPERCARD};
 use tombola::score::ScoreCard;
 use tombola::board::Board;
 use tombola::pouch::Pouch;
+use tombola::config::ClientConfig;
 
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
@@ -342,13 +343,17 @@ impl TombolaClient {
 }
 
 // Example usage and main function for testing
-fn main() {
+#[tokio::main]
+async fn main() {
     println!("🚀 Tombola Client Starting...");
+
+    // Load client configuration
+    let config = ClientConfig::load_or_default();
+    let server_url = config.server_url();
 
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
-    let client_name = args.get(1).unwrap_or(&"TestClient".to_string()).clone();
-    let server_url = "http://localhost:3000".to_string();
+    let client_name = args.get(1).unwrap_or(&config.client_name).clone();
 
     // Create and register client
     let mut client = TombolaClient::new(&client_name, &server_url);
@@ -372,23 +377,14 @@ fn main() {
         }
     }
 
-    // Create a tokio runtime for async operations
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(runtime) => runtime,
-        Err(e) => {
-            println!("❌ Failed to create Tokio runtime: {e}");
-            std::process::exit(1);
-        }
-    };
-
     // Register with server
-    let registration_result = rt.block_on(client.register());
+    let registration_result = client.register().await;
     match registration_result {
         Ok(()) => {
             println!("✅ Client registered successfully!");
 
             // Get assigned cards info once
-            let assigned_cards = match rt.block_on(client.list_assigned_cards()) {
+            let assigned_cards = match client.list_assigned_cards().await {
                 Ok(response) => response.cards,
                 Err(e) => {
                     println!("❌ Failed to list assigned cards: {e}");
@@ -415,7 +411,7 @@ fn main() {
                 println!("🕐 Last update: {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"));
 
                 // Get the current board (extracted numbers) from the server
-                let extracted_numbers = match rt.block_on(client.get_board()) {
+                let extracted_numbers = match client.get_board().await {
                     Ok(board) => {
                         if !board.is_empty() {
                             println!("🎯 Extracted numbers ({}): {:?}", board.len(), board);
@@ -431,7 +427,7 @@ fn main() {
                 };
 
                 // Get the current scorecard from the server
-                let scorecard = match rt.block_on(client.get_scorecard()) {
+                let scorecard = match client.get_scorecard().await {
                     Ok(scorecard) => {
                         if scorecard.published_score > 0 {
                             println!("📊 Current scorecard: {} (achievements shown only if card ID is published in score map)", scorecard.published_score);
@@ -452,7 +448,7 @@ fn main() {
                 let mut card_achievements = Vec::new();
 
                 for (index, card) in assigned_cards.iter().enumerate() {
-                    match rt.block_on(client.get_assigned_card(&card.card_id)) {
+                    match client.get_assigned_card(&card.card_id).await {
                         Ok(card_info) => {
                             let (is_bingo, achievements) = print_card_as_table_with_highlights(index + 1, &card_info.card_id, &card_info.card_data, &extracted_numbers, &scorecard);
                             if is_bingo {

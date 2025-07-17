@@ -7,8 +7,8 @@ A Rust-based multi-binary tombola (bingo) game with a client-server architecture
 This project consists of three main binaries:
 
 - **`tombola-server`**: Main game server with terminal UI and HTTP API
-- **`board_client`**: Terminal client that displays current game state  
-- **`card_client`**: Interactive client for card management and gameplay
+- **`tombola-client`**: Terminal client that displays current game state  
+- **`tombola-player`**: Interactive client for card management and gameplay
 
 ## Features
 
@@ -44,20 +44,20 @@ cargo build --release
 cargo run --bin tombola-server
 
 # Run display-only client
-cargo run --bin board_client
+cargo run --bin tombola-client
 
 # Run display-only client with game reset
-cargo run --bin board_client -- --newgame
+cargo run --bin tombola-client -- --newgame
 
 # Run interactive card client  
-cargo run --bin card_client
+cargo run --bin tombola-player
 ```
 
 ## Client Options
 
 ### Board Client CLI Options
 
-The `board_client` supports the following command-line options:
+The `tombola-client` supports the following command-line options:
 
 - `--newgame`: Reset the game state before starting the client interface
 - `--help`: Display help information
@@ -66,13 +66,13 @@ The `board_client` supports the following command-line options:
 **Examples:**
 ```bash
 # Start board client normally
-cargo run --bin board_client
+cargo run --bin tombola-client
 
 # Start board client with game reset
-cargo run --bin board_client -- --newgame
+cargo run --bin tombola-client -- --newgame
 
 # Get help information
-cargo run --bin board_client -- --help
+cargo run --bin tombola-client -- --help
 ```
 
 **Notes about --newgame option:**

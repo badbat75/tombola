@@ -15,11 +15,12 @@ use clap::Parser;
 use tombola::defs::Number;
 use tombola::board::Board;
 use tombola::terminal;
+use tombola::config::ClientConfig;
 
 #[derive(Parser)]
-#[command(name = "board_client")]
+#[command(name = env!("CARGO_BIN_NAME"))]
 #[command(about = "Tombola Board Client - Display game state and perform extractions")]
-#[command(version = "0.1.0")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
 struct Args {
     /// Reset the game state before starting the client
     #[arg(long)]
@@ -58,17 +59,18 @@ fn extract_highest_achievement_numbers(scorecard: &tombola::score::ScoreCard) ->
     }
 }
 
-// Client configuration
-const SERVER_BASE_URL: &str = "http://127.0.0.1:3000";
-
 pub async fn run_client() -> Result<(), Box<dyn Error>> {
+    // Load client configuration
+    let config = ClientConfig::load_or_default();
+    let server_base_url = config.server_url();
+    
     // Main game loop
     loop {
         // Retrieve and display current game state
-        let board_numbers = get_board_data().await?;
+        let board_numbers = get_board_data(&server_base_url).await?;
         
         // Retrieve scorecard data first
-        let scorecard_data = get_scoremap().await?;
+        let scorecard_data = get_scoremap(&server_base_url).await?;
         
         // Create a board for display purposes and recreate the proper state
         let mut display_board = Board::new();
@@ -85,7 +87,7 @@ pub async fn run_client() -> Result<(), Box<dyn Error>> {
         display_board.update_marked_numbers(numbers_to_highlight);
         
         // Retrieve pouch data
-        let pouch_data = get_pouch_data().await?;
+        let pouch_data = get_pouch_data(&server_base_url).await?;
         
         // Display current state
         terminal::show_on_terminal(&display_board, &pouch_data, &scorecard_data);
@@ -102,7 +104,7 @@ pub async fn run_client() -> Result<(), Box<dyn Error>> {
             match terminal::wait_for_user_action() {
                 terminal::KeyAction::Extract => {
                     // Extract a number
-                    match extract_number().await {
+                    match extract_number(&server_base_url).await {
                         Ok(extracted) => {
                             println!("Successfully extracted number: {}", extracted);
                             break true; // Continue main loop to refresh display
@@ -144,8 +146,8 @@ pub async fn run_client() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn test_server_connection() -> Result<(), Box<dyn Error>> {
-    let url = format!("{SERVER_BASE_URL}/status");
+async fn test_server_connection(server_base_url: &str) -> Result<(), Box<dyn Error>> {
+    let url = format!("{}/status", server_base_url);
     let response = reqwest::get(&url).await?;
     
     if response.status().is_success() {
@@ -155,8 +157,8 @@ async fn test_server_connection() -> Result<(), Box<dyn Error>> {
     }
 }
 
-async fn get_board_data() -> Result<Vec<Number>, Box<dyn Error>> {
-    let url = format!("{SERVER_BASE_URL}/board");
+async fn get_board_data(server_base_url: &str) -> Result<Vec<Number>, Box<dyn Error>> {
+    let url = format!("{}/board", server_base_url);
     let response = reqwest::get(&url).await?;
     
     if response.status().is_success() {
@@ -167,8 +169,8 @@ async fn get_board_data() -> Result<Vec<Number>, Box<dyn Error>> {
     }
 }
 
-async fn get_pouch_data() -> Result<Vec<Number>, Box<dyn Error>> {
-    let url = format!("{SERVER_BASE_URL}/pouch");
+async fn get_pouch_data(server_base_url: &str) -> Result<Vec<Number>, Box<dyn Error>> {
+    let url = format!("{}/pouch", server_base_url);
     let response = reqwest::get(&url).await?;
     
     if response.status().is_success() {
@@ -180,9 +182,9 @@ async fn get_pouch_data() -> Result<Vec<Number>, Box<dyn Error>> {
     }
 }
 
-async fn extract_number() -> Result<u8, Box<dyn Error>> {
+async fn extract_number(server_base_url: &str) -> Result<u8, Box<dyn Error>> {
     let client = reqwest::Client::new();
-    let url = format!("{SERVER_BASE_URL}/extract");
+    let url = format!("{}/extract", server_base_url);
     
     let response = client
         .post(&url)
@@ -205,8 +207,8 @@ async fn extract_number() -> Result<u8, Box<dyn Error>> {
     }
 }
 
-async fn get_scoremap() -> Result<tombola::score::ScoreCard, Box<dyn Error>> {
-    let url = format!("{SERVER_BASE_URL}/scoremap");
+async fn get_scoremap(server_base_url: &str) -> Result<tombola::score::ScoreCard, Box<dyn Error>> {
+    let url = format!("{}/scoremap", server_base_url);
     let response = reqwest::get(&url).await?;
     
     if response.status().is_success() {
@@ -217,9 +219,9 @@ async fn get_scoremap() -> Result<tombola::score::ScoreCard, Box<dyn Error>> {
     }
 }
 
-async fn call_newgame() -> Result<(), Box<dyn Error>> {
+async fn call_newgame(server_base_url: &str) -> Result<(), Box<dyn Error>> {
     let client = reqwest::Client::new();
-    let url = format!("{SERVER_BASE_URL}/newgame");
+    let url = format!("{}/newgame", server_base_url);
     
     println!("🔄 Initiating new game...");
     
@@ -270,15 +272,19 @@ async fn main() {
 }
 
 async fn run_client_with_args(args: Args) -> Result<(), Box<dyn Error>> {
+    // Load client configuration
+    let config = ClientConfig::load_or_default();
+    let server_base_url = config.server_url();
+    
     println!("Tombola Terminal Client");
-    print!("Connecting to server at {SERVER_BASE_URL}...");
+    print!("Connecting to server at {}...", server_base_url);
 
     // Test server connectivity first
-    match test_server_connection().await {
+    match test_server_connection(&server_base_url).await {
         Ok(_) => println!("Ok. ✓"),
         Err(e) => {
             eprintln!("Error. ✗ Failed to connect to server: {e}");
-            eprintln!("Make sure the tombola server is running on {SERVER_BASE_URL}");
+            eprintln!("Make sure the tombola server is running on {}", server_base_url);
             return Err(e);
         }
     }
@@ -286,7 +292,7 @@ async fn run_client_with_args(args: Args) -> Result<(), Box<dyn Error>> {
 
     // Handle newgame option if requested
     if args.newgame {
-        match call_newgame().await {
+        match call_newgame(&server_base_url).await {
             Ok(_) => {
                 // Success message already printed by call_newgame()
             }

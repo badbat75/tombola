@@ -7,10 +7,14 @@ use tombola::server;
 use tombola::pouch::Pouch;
 use tombola::board::Board;
 use tombola::score::ScoreCard;
+use tombola::config::ServerConfig;
 
 // Function to wait for a key press and return true if ESC is pressed, false otherwise
 #[tokio::main]
 async fn main() {
+    // Load server configuration
+    let config = ServerConfig::load_or_default();
+    
     // Initialize and fill the pouch
     let pouch_ref = Arc::new(Mutex::new(Pouch::new()));
 
@@ -21,12 +25,12 @@ async fn main() {
     let scorecard_ref = Arc::new(Mutex::new(ScoreCard::new()));
     
     // Start the API server in the background with the board reference
-    let (server_handle, _shutdown_signal, _card_manager) = server::start_server(Arc::clone(&board_ref), Arc::clone(&pouch_ref), Arc::clone(&scorecard_ref));
+    let (server_handle, _shutdown_signal, _card_manager) = server::start_server(Arc::clone(&board_ref), Arc::clone(&pouch_ref), Arc::clone(&scorecard_ref), config.clone());
 
     println!("🎯 Tombola Game Server Started");
-    println!("📡 API Server running on http://127.0.0.1:3000");
+    println!("📡 API Server running on http://{}:{}", config.host, config.port);
     println!("🎮 Use board_client for game display");
-    println!("� Use /extract endpoint with board client ID for number extraction");
+    println!("🎲 Use /extract endpoint with board client ID for number extraction");
     println!("🚪 Press Ctrl+C to stop the server");
 
     // Simple main loop - wait for the server to finish or Ctrl+C
