@@ -16,23 +16,31 @@ This project consists of three main binaries:
   - Visual board display with proper spacing and color coding
   - Real-time score checking (2, 3, 4, 5 in a row, BINGO)
   - HTTP API for client integration
-  - Thread-safe shared state management
+  - Unified Game state management with unique IDs and timestamps
+  - Thread-safe shared state management with Arc<Mutex<T>>
   - Card generation with anti-adjacency patterns
   - Game reset functionality with complete state cleanup
+  - Centralized logging system with timestamps
+  - Modular extraction engine shared between terminal and API
 
 - **Client Components:**
   - Terminal-based board display client with CLI options
   - Interactive card management client
   - HTTP API integration with authentication
   - Command-line game reset capabilities
+  - File-based configuration support
+  - Real-time game state synchronization
 
 ## Configuration
 
-The game uses configurable card layouts:
+The game uses configurable card layouts and settings:
 - Default: 2×3 grid of cards (6 cards total)
 - Each card contains 5×3 numbers (15 numbers per card)
-- Numbers range from 1-90
+- Numbers range from 1-90 (calculated as FIRSTNUMBER to LASTNUMBER)
 - Cards follow tombola rules with proper column distribution
+- Server configuration: Host/port settings (default: 127.0.0.1:3000)
+- Client configuration: Connection settings with timeouts and retry logic
+- File-based configuration support with fallback to defaults
 
 ## Build and Run
 
@@ -107,16 +115,43 @@ The server provides a RESTful HTTP API on `http://127.0.0.1:3000`. See `docs/TOM
 
 ### Card Client:
 - Interactive menu-driven interface for card management
+- Card assignment and viewing capabilities
+- Integration with HTTP API for real-time updates
+
+## Core Architecture
+
+### Game State Management:
+- **Game Super Struct**: Unified `Game` struct that encapsulates all game state components
+- **Unique Game IDs**: Each game instance has a randomly generated 8-digit hexadecimal ID (format: `game_12345678`)
+- **Creation Timestamps**: Games include creation timestamps with human-readable formatting
+- **Enhanced API Responses**: Game ID and creation time included in status and reset endpoints
+
+### Modular Components:
+- **`game.rs`**: Unified game state management with ID and timestamp tracking
+- **`config.rs`**: Configuration management with file-based settings
+- **`logging.rs`**: Centralized logging with timestamp formatting
+- **`extraction.rs`**: Shared extraction logic between server and API
+- **`lib.rs`**: Library structure for shared functionality
+
+### Thread-Safe State Management:
+- Uses `Arc<Mutex<T>>` for coordinated access to shared game state
+- Consistent mutex acquisition order to prevent deadlocks
+- Shared state includes: Board, Pouch, ScoreCard, CardAssignmentManager, ClientRegistry
+- Unified through the Game struct with proper coordination methods
 
 ## Dependencies
 
-- `crossterm` - For terminal manipulation and keyboard input
-- `rand` - For random number generation
-- `tokio` - Async runtime
-- `hyper` - HTTP server
-- `reqwest` - HTTP client (for client binaries)
-- `serde` - JSON serialization
-- `clap` - Command line argument parsing
+- `rand` - Random number generation for pouch extraction
+- `crossterm` - Cross-platform terminal manipulation and keyboard input
+- `tokio` - Async runtime with macros, rt-multi-thread, net, and time features
+- `reqwest` - HTTP client with JSON support (for client binaries)
+- `serde` - Serialization framework with derive features
+- `serde_json` - JSON serialization support
+- `hyper` - HTTP server with server and http1 features
+- `hyper-util` - Hyper utilities with tokio features
+- `http-body-util` - HTTP body utilities
+- `chrono` - Date and time library for logging timestamps
+- `clap` - Command line argument parsing with derive features
 
 ## Development
 

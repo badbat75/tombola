@@ -4,15 +4,20 @@
 
 The Tombola API provides a RESTful HTTP interface for managing tombola games, client registration, and card management. The server runs on `http://127.0.0.1:3000` and uses JSON for request/response payloads.
 
+## Game Architecture
+
+The Tombola server uses a unified **Game super struct** that encapsulates all game state components:
+
+- **Unique Game IDs**: Each game instance has a randomly generated 8-digit hexadecimal identifier (format: `game_12345678`)
+- **Creation Timestamps**: Games include creation timestamps for tracking and debugging purposes
+- **Thread-Safe Components**: All game state is managed through coordinated `Arc<Mutex<T>>` access
+- **State Components**: Board, Pouch, ScoreCard, ClientRegistry, and CardAssignmentManager
+- **Enhanced Responses**: Game ID and creation time are included in status and reset API responses
+
 ## Base URL
 ```
-http://127.0.0.1:30005. **Get specific card:**
-```bash
-curl http://127.0.0.1:3000/getassignedcard/card_id_1 \
-  -H "X-Client-ID: A1B2C3D4E5F6G7H8"
+http://127.0.0.1:3000
 ```
-
-6. **Check game state:**
 ## Authentication
 
 Most endpoints require client authentication via the `X-Client-ID` header. Clients must register first to obtain a client ID.
@@ -67,7 +72,7 @@ Register a new client with the tombola server.
 }
 ```
 
-**Response:**
+**Success Response (200 OK):**
 ```json
 {
   "client_id": "A1B2C3D4E5F6G7H8",
@@ -75,7 +80,17 @@ Register a new client with the tombola server.
 }
 ```
 
+**Error Response - Registration After Game Started (409 Conflict):**
+```json
+{
+  "error": "Cannot register new clients after numbers have been extracted"
+}
+```
+
 **Notes:**
+- **Game State Restriction**: New clients can only be registered when no numbers have been extracted from the pouch
+- Once the first number is extracted, all new registration attempts will fail with a 409 Conflict error
+- This ensures fair play by preventing players from joining mid-game
 - If `nocard` is not specified, the server will automatically generate 1 card for the client by default
 - If `nocard` is specified, the server will generate and assign the requested number of cards to the client
 - If client already exists, returns existing client information
@@ -307,6 +322,8 @@ Get overall server status and game information.
 ```json
 {
   "status": "running",
+  "game_id": "game_12345678",
+  "created_at": "2025-07-17 14:30:25 UTC",
   "numbers_extracted": 8,
   "scorecard": 5,
   "server": "tokio-hyper"
@@ -314,6 +331,8 @@ Get overall server status and game information.
 ```
 
 **Notes:**
+- `game_id`: Unique 8-digit hexadecimal identifier for the current game instance
+- `created_at`: Human-readable timestamp when the current game was created/reset
 - `numbers_extracted`: Total count of numbers extracted so far
 - `scorecard`: Current published score (highest achievement level reached)
 - `server`: Server implementation identifier
@@ -396,6 +415,8 @@ curl -X POST http://127.0.0.1:3000/newgame \
 {
   "success": true,
   "message": "New game started successfully",
+  "game_id": "game_87654321",
+  "created_at": "2025-07-17 14:35:12 UTC",
   "reset_components": [
     "Board state cleared",
     "Pouch refilled with numbers 1-90",
@@ -420,12 +441,15 @@ curl -X POST http://127.0.0.1:3000/newgame \
 ```
 
 **Notes:**
-- Resets all shared game state to initial conditions
+- Resets all shared game state to initial conditions and generates a new unique game ID
+- **Game Instance Tracking**: Each new game gets a unique 8-digit hexadecimal ID and fresh timestamp
 - **Security**: Only the special board client (ID: "0000000000000000") is authorized to reset the game
 - Clears the Board (extracted numbers and marked positions)
 - Refills the Pouch with all numbers from 1-90
 - Resets the ScoreCard to initial state (published_score: 0, empty score_map)
 - Clears all card assignments from CardAssignmentManager
+- Clears all registered clients from the client registry
+- **After reset**: New clients can register again since no numbers have been extracted
 - Follows the coordinated mutex locking pattern to ensure thread safety
 - Server logs the game reset with client identification for audit purposes
 - All clients will need to re-register and obtain new card assignments after a game reset
@@ -453,6 +477,8 @@ Tombola cards follow specific rules:
 
 ### Complete Client Workflow
 
+**Important**: Client registration must be completed before any numbers are extracted from the pouch.
+
 1. **Register a client with default card (1 card):**
 ```bash
 curl -X POST http://127.0.0.1:3000/register \
@@ -465,6 +491,14 @@ curl -X POST http://127.0.0.1:3000/register \
 curl -X POST http://127.0.0.1:3000/register \
   -H "Content-Type: application/json" \
   -d '{"name": "player2", "client_type": "player", "nocard": 6}'
+```
+
+**Note**: After the first number is extracted via `/extract`, registration will fail:
+```bash
+# This will return 409 Conflict if numbers have been extracted
+curl -X POST http://127.0.0.1:3000/register \
+  -H "Content-Type: application/json" \
+  -d '{"name": "lateplayer", "client_type": "player"}'
 ```
 
 3. **Get client information by name:**
