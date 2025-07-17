@@ -75,7 +75,7 @@ pub fn start_server(config: ServerConfig) -> (tokio::task::JoinHandle<()>, Arc<A
                     // Spawn a task to handle the connection
                     tokio::spawn(async move {
                         let service = service_fn(move |req| {
-                            handle_request(req, Arc::clone(&board_clone), Arc::clone(&pouch_clone), Arc::clone(&scorecard_clone), registry_clone.clone(), Arc::clone(&card_manager_clone))
+                            handle_request(req, Arc::clone(&board_clone), Arc::clone(&pouch_clone), Arc::clone(&scorecard_clone), Arc::clone(&registry_clone), Arc::clone(&card_manager_clone))
                         });
                         
                         if let Err(err) = http1::Builder::new()
@@ -112,7 +112,7 @@ async fn handle_request(
 ) -> Result<Response<Full<Bytes>>, Infallible> {
     let response = match (req.method(), req.uri().path()) {
         (&Method::POST, "/register") => {
-            handle_register(req, client_registry, card_manager).await
+            handle_register(req, board_ref, client_registry, card_manager).await
         }
         (&Method::GET, path) if path.starts_with("/client/") => {
             let client_name = &path[8..]; // Remove "/client/" prefix
@@ -161,6 +161,7 @@ async fn handle_request(
 // Handle client registration
 async fn handle_register(
     req: Request<hyper::body::Incoming>,
+    board_ref: Arc<Mutex<Board>>,
     client_registry: Arc<Mutex<ClientRegistry>>,
     card_manager: Arc<Mutex<CardAssignmentManager>>,
 ) -> Response<Full<Bytes>> {
@@ -221,9 +222,32 @@ async fn handle_register(
                 .unwrap();
         }
 
-        // Store new client information (using name as key)
-        registry.insert(register_request.name.clone(), client_info);
-        log_info(&format!("Client registered: {} (ID: {})", register_request.name, client_id));
+        // Check if numbers have been extracted
+        let numbers_extracted = if let Ok(board) = board_ref.lock() {
+            !board.is_empty()
+        } else {
+            // If we can't access the board, assume game has started for safety
+            true
+        };
+
+        // Try to register the new client (will fail if numbers have been extracted)
+        match registry.insert(register_request.name.clone(), client_info, numbers_extracted) {
+            Ok(_) => {
+                log_info(&format!("Client registered: {} (ID: {})", register_request.name, client_id));
+            }
+            Err(error_msg) => {
+                let error_response = ErrorResponse {
+                    error: error_msg,
+                };
+                let body = serde_json::to_string(&error_response).unwrap_or_else(|_| "{}".to_string());
+                return Response::builder()
+                    .status(StatusCode::CONFLICT)
+                    .header("Content-Type", "application/json")
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(Full::new(Bytes::from(body)))
+                    .unwrap();
+            }
+        }
     }
 
     // Check if client requested cards during registration, default to 1 if not specified
@@ -727,13 +751,12 @@ async fn handle_get_assigned_card(
 
 // Handle board endpoint
 async fn handle_board(board_ref: Arc<Mutex<Board>>) -> Response<Full<Bytes>> {
-    let board = if let Ok(board) = board_ref.lock() {
-        board.clone()
+    let body = if let Ok(board) = board_ref.lock() {
+        serde_json::to_string(&*board).unwrap_or_else(|_| "{}".to_string())
     } else {
-        Board::new()
+        serde_json::to_string(&Board::new()).unwrap_or_else(|_| "{}".to_string())
     };
     
-    let body = serde_json::to_string(&board).unwrap_or_else(|_| "{}".to_string());
     Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/json")
@@ -744,12 +767,12 @@ async fn handle_board(board_ref: Arc<Mutex<Board>>) -> Response<Full<Bytes>> {
 
 // Handle pouch endpoint
 async fn handle_pouch(pouch_ref: Arc<Mutex<Pouch>>) -> Response<Full<Bytes>> {
-    let pouch = if let Ok(pouch) = pouch_ref.lock() {
-        pouch.clone()
+    let body = if let Ok(pouch) = pouch_ref.lock() {
+        serde_json::to_string(&*pouch).unwrap_or_else(|_| "{}".to_string())
     } else {
-        Pouch::new()
+        serde_json::to_string(&Pouch::new()).unwrap_or_else(|_| "{}".to_string())
     };
-    let body = serde_json::to_string(&pouch).unwrap_or_else(|_| "{}".to_string());
+    
     Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/json")
@@ -760,13 +783,12 @@ async fn handle_pouch(pouch_ref: Arc<Mutex<Pouch>>) -> Response<Full<Bytes>> {
 
 // Handle scoremap endpoint
 async fn handle_scoremap(scorecard_ref: Arc<Mutex<ScoreCard>>) -> Response<Full<Bytes>> {
-    let scorecard = if let Ok(scorecard) = scorecard_ref.lock() {
-        scorecard.clone()
+    let body = if let Ok(scorecard) = scorecard_ref.lock() {
+        serde_json::to_string(&*scorecard).unwrap_or_else(|_| "{}".to_string())
     } else {
-        ScoreCard::new()
+        serde_json::to_string(&ScoreCard::new()).unwrap_or_else(|_| "{}".to_string())
     };
     
-    let body = serde_json::to_string(&scorecard).unwrap_or_else(|_| "{}".to_string());
     Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/json")

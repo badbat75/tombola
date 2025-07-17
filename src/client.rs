@@ -78,9 +78,12 @@ impl ClientRegistry {
         }
     }
 
-    // Insert a client into the registry
-    pub fn insert(&mut self, key: String, client: ClientInfo) -> Option<ClientInfo> {
-        self.clients.insert(key, client)
+    // Insert a client into the registry (only if no numbers have been extracted)
+    pub fn insert(&mut self, key: String, client: ClientInfo, numbers_extracted: bool) -> Result<Option<ClientInfo>, String> {
+        if numbers_extracted {
+            return Err("Cannot register new clients after numbers have been extracted".to_string());
+        }
+        Ok(self.clients.insert(key, client))
     }
 
     // Get a client by key
