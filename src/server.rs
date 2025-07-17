@@ -19,6 +19,9 @@ use crate::defs::Number;
 use crate::client::{RegisterRequest, RegisterResponse, ClientInfoResponse, ClientInfo, ClientRegistry, generate_client_id};
 use crate::card::{CardAssignmentManager, GenerateCardsRequest, GenerateCardsResponse, CardInfo, ListAssignedCardsResponse, AssignedCardInfo};
 
+// Import the extraction function from extraction module
+use crate::extraction::perform_extraction;
+
 // Response structures for JSON serialization
 #[derive(serde::Serialize)]
 struct ErrorResponse {
@@ -132,6 +135,9 @@ async fn handle_request(
         }
         (&Method::GET, "/scoremap") => {
             handle_scoremap(scorecard_ref).await
+        }
+        (&Method::POST, "/extract") => {
+            handle_extract(req, board_ref, pouch_ref, scorecard_ref, card_manager).await
         }
         (&Method::GET, "/status") => {
             handle_status(board_ref, scorecard_ref).await
@@ -256,7 +262,7 @@ fn get_board_length(board_ref: &Arc<Mutex<Board>>) -> usize {
 // Function to get the scorecard value from the scorecard
 fn get_scorecard_from_scorecard(scorecard_ref: &Arc<Mutex<ScoreCard>>) -> Number {
     if let Ok(scorecard) = scorecard_ref.lock() {
-        scorecard.scorecard
+        scorecard.published_score
     } else {
         0
     }
@@ -714,6 +720,134 @@ async fn handle_status(board_ref: Arc<Mutex<Board>>, scorecard_ref: Arc<Mutex<Sc
         .header("Access-Control-Allow-Origin", "*")
         .body(Full::new(Bytes::from(body)))
         .unwrap()
+}
+
+// Handle extract endpoint - performs number extraction
+async fn handle_extract(
+    req: Request<hyper::body::Incoming>,
+    board_ref: Arc<Mutex<Board>>,
+    pouch_ref: Arc<Mutex<Pouch>>,
+    scorecard_ref: Arc<Mutex<ScoreCard>>,
+    card_manager: Arc<Mutex<CardAssignmentManager>>,
+) -> Response<Full<Bytes>> {
+    // Get client ID from headers for authentication
+    let client_id = match req.headers().get("X-Client-ID") {
+        Some(header_value) => {
+            match header_value.to_str() {
+                Ok(id) => id.to_string(),
+                Err(_) => {
+                    let error_response = ErrorResponse {
+                        error: "Invalid client ID in header".to_string(),
+                    };
+                    let body = serde_json::to_string(&error_response).unwrap_or_else(|_| "{}".to_string());
+                    return Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .header("Content-Type", "application/json")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(Full::new(Bytes::from(body)))
+                        .unwrap();
+                }
+            }
+        }
+        None => {
+            let error_response = ErrorResponse {
+                error: "Client ID header (X-Client-ID) is required".to_string(),
+            };
+            let body = serde_json::to_string(&error_response).unwrap_or_else(|_| "{}".to_string());
+            return Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .header("Content-Type", "application/json")
+                .header("Access-Control-Allow-Origin", "*")
+                .body(Full::new(Bytes::from(body)))
+                .unwrap();
+        }
+    };
+
+    // Only allow board client (ID: "0000000000000000") to extract numbers
+    if client_id != "0000000000000000" {
+        let error_response = ErrorResponse {
+            error: "Unauthorized: Only board client can extract numbers".to_string(),
+        };
+        let body = serde_json::to_string(&error_response).unwrap_or_else(|_| "{}".to_string());
+        return Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .header("Content-Type", "application/json")
+            .header("Access-Control-Allow-Origin", "*")
+            .body(Full::new(Bytes::from(body)))
+            .unwrap();
+    }
+
+    // Check if BINGO has been reached - if so, no more extractions allowed
+    if let Ok(scorecard) = scorecard_ref.lock() {
+        if scorecard.published_score >= 15 { // BINGO reached
+            let error_response = ErrorResponse {
+                error: "Game over: BINGO has been reached. No more numbers can be extracted.".to_string(),
+            };
+            let body = serde_json::to_string(&error_response).unwrap_or_else(|_| "{}".to_string());
+            return Response::builder()
+                .status(StatusCode::CONFLICT)
+                .header("Content-Type", "application/json")
+                .header("Access-Control-Allow-Origin", "*")
+                .body(Full::new(Bytes::from(body)))
+                .unwrap();
+        }
+    }
+
+    // Extract a number using the shared extraction logic
+    match perform_extraction(&pouch_ref, &board_ref, &scorecard_ref, &card_manager, 0) {
+        Ok((extracted_number, _new_working_score)) => {
+            // Get current pouch and board state for response
+            let numbers_remaining = if let Ok(pouch) = pouch_ref.lock() {
+                pouch.len()
+            } else {
+                0
+            };
+            
+            let total_extracted = if let Ok(board) = board_ref.lock() {
+                board.len()
+            } else {
+                0
+            };
+            
+            println!("🎯 Number {} extracted via API by client {}", extracted_number, client_id);
+            
+            // Create success response
+            let response = json!({
+                "success": true,
+                "extracted_number": extracted_number,
+                "numbers_remaining": numbers_remaining,
+                "total_extracted": total_extracted,
+                "message": format!("Number {} extracted successfully", extracted_number)
+            });
+            
+            let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "application/json")
+                .header("Access-Control-Allow-Origin", "*")
+                .body(Full::new(Bytes::from(body)))
+                .unwrap()
+        }
+        Err(error_msg) => {
+            // Handle extraction errors
+            let status_code = if error_msg.contains("empty") {
+                StatusCode::CONFLICT
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            
+            let error_response = ErrorResponse {
+                error: error_msg,
+            };
+            let body = serde_json::to_string(&error_response).unwrap_or_else(|_| "{}".to_string());
+            Response::builder()
+                .status(status_code)
+                .header("Content-Type", "application/json")
+                .header("Access-Control-Allow-Origin", "*")
+                .body(Full::new(Bytes::from(body)))
+                .unwrap()
+        }
+    }
 }
 
 // Handle 404 not found

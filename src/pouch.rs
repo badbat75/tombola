@@ -5,7 +5,6 @@ use rand::{rng, Rng};
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Pouch {
     pub numbers: Vec<Number>,
-    pub remaining: usize,
 }
 
 impl Default for Pouch {
@@ -17,15 +16,13 @@ impl Default for Pouch {
 impl Pouch {
     pub fn new() -> Self {
         let numbers: Vec<Number> = (FIRSTNUMBER..=LASTNUMBER).collect();
-        let remaining = numbers.len();
         Pouch {
             numbers,
-            remaining,
         }
     }
     
     pub fn len(&self) -> usize {
-        self.remaining
+        self.numbers.len()
     }
     
     pub fn is_empty(&self) -> bool {
@@ -33,9 +30,7 @@ impl Pouch {
     }
     
     fn remove(&mut self, index: usize) -> Number {
-        let number = self.numbers.remove(index);
-        self.remaining = self.numbers.len();
-        number
+        self.numbers.remove(index)
     }
 
     pub fn extract(&mut self) -> Number {

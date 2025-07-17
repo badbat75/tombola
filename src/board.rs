@@ -2,6 +2,7 @@
 // This module handles the Board implementation for the Tombola game.
 
 use crate::defs::Number;
+use crate::score::ScoreCard;
 use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
@@ -27,7 +28,19 @@ impl Board {
         }
     }
     
-    pub fn push(&mut self, entry: Number) {
+    pub fn push(&mut self, entry: Number, scorecard: &ScoreCard) -> Number {
+        self.numbers.push(entry);
+        
+        // Calculate score and numbers to mark
+        let (score, numbers_to_mark) = scorecard.board_calculate_score(&self.numbers);
+        
+        // Update marked numbers based on scoring
+        self.update_marked_numbers(numbers_to_mark);
+        
+        score
+    }
+    
+    pub fn push_simple(&mut self, entry: Number) {
         self.numbers.push(entry);
     }
     

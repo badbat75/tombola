@@ -27,6 +27,9 @@ Most endpoints require client authentication via the `X-Client-ID` header. Clien
 
 - `Number`: 8-bit unsigned integer (u8) representing tombola numbers (1-90)
 - `Card`: 3x9 grid where each cell can contain a number or be empty (represented as `Option<u8>`)
+- `ScoreAchievement`: Object containing achievement details
+  - `card_id`: String identifier for the card that achieved the score
+  - `numbers`: Array of numbers that directly contributed to the achievement
 
 ## Error Responses
 
@@ -209,15 +212,14 @@ Get the current pouch state (remaining numbers).
 **Response:**
 ```json
 {
-  "numbers": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 38, 39, 40, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 69, 70, 71, 72, 73, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 90],
-  "remaining": 82
+  "numbers": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 38, 39, 40, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 69, 70, 71, 72, 73, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 90]
 }
 ```
 
 **Notes:**
-- Returns Pouch struct directly with numbers array and remaining count
+- Returns Pouch struct directly with numbers array
 - `numbers` contains all numbers that haven't been extracted yet
-- `remaining` is the count of numbers still in the pouch
+- The count of remaining numbers can be obtained from the length of the numbers array
 
 #### GET /scoremap
 
@@ -226,23 +228,47 @@ Get the current scorecard and score map (prize tracking information).
 **Response:**
 ```json
 {
-  "scorecard": 74,
+  "published_score": 5,
   "score_map": {
-    "2": ["A1B2C3D4E5F6G7H8"],
-    "3": ["A1B2C3D4E5F6G7H8", "0000000000000000"],
-    "5": ["0000000000000000"]
+    "2": [
+      {
+        "card_id": "A1B2C3D4E5F6G7H8",
+        "numbers": [15, 23]
+      }
+    ],
+    "3": [
+      {
+        "card_id": "A1B2C3D4E5F6G7H8", 
+        "numbers": [15, 23, 37]
+      },
+      {
+        "card_id": "0000000000000000",
+        "numbers": [15, 23, 37]
+      }
+    ],
+    "5": [
+      {
+        "card_id": "0000000000000000",
+        "numbers": [15, 23, 37, 41, 52]
+      }
+    ]
   }
 }
 ```
 
 **Notes:**
-- Returns ScoreCard struct directly with scorecard and score_map fields
-- `scorecard`: The most recently extracted number (current score)
-- `score_map`: Map of score indices to arrays of card IDs that achieved those scores
-- Returns `scorecard: 0` if no numbers have been extracted yet
-- Each key in score_map represents a score level (2, 3, 4, 5 numbers in a line, or 15 for BINGO)
-- Values are arrays of card IDs that achieved that score level
-- Card ID "0000000000000000" represents the main board
+- Returns ScoreCard struct with `published_score` and `score_map` fields
+- `published_score`: The highest score achieved so far (current published achievement level)
+- `score_map`: Map of score indices to arrays of ScoreAchievement objects
+- Each ScoreAchievement contains:
+  - `card_id`: The ID of the card that achieved the score (or "0000000000000000" for board achievements)
+  - `numbers`: Array of specific numbers that contributed to achieving that score level
+- Returns `published_score: 0` if no achievements have been recorded yet
+- Each key in score_map represents a score level:
+  - `2`, `3`, `4`, `5`: Number of numbers in a line achievement
+  - `15`: BINGO (full card completion)
+- For line achievements, `numbers` contains only the numbers from the winning line
+- For BINGO achievements, `numbers` contains all 15 numbers that completed the card
 - Empty score_map `{}` if no scores have been recorded yet
 
 #### GET /status
@@ -254,15 +280,73 @@ Get overall server status and game information.
 {
   "status": "running",
   "numbers_extracted": 8,
-  "scorecard": 74,
+  "scorecard": 5,
   "server": "tokio-hyper"
 }
 ```
 
 **Notes:**
 - `numbers_extracted`: Total count of numbers extracted so far
-- `scorecard`: Last extracted number
+- `scorecard`: Current published score (highest achievement level reached)
 - `server`: Server implementation identifier
+
+#### POST /extract
+
+Extract the next number from the pouch (remote extraction control).
+
+**Authentication Required:** Yes (X-Client-ID header must be "0000000000000000")
+
+**Authorization:** Only the board client with ID "0000000000000000" can extract numbers.
+
+**Request:**
+```bash
+curl -X POST http://127.0.0.1:3000/extract \
+  -H "X-Client-ID: 0000000000000000" \
+  -H "Content-Type: application/json"
+```
+
+**Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "extracted_number": 42,
+  "numbers_remaining": 82,
+  "total_extracted": 8,
+  "message": "Number 42 extracted successfully"
+}
+```
+
+**Error Response - Unauthorized Client (403 Forbidden):**
+```json
+{
+  "error": "Unauthorized: Only board client can extract numbers"
+}
+```
+
+**Error Response - Pouch Empty (409 Conflict):**
+```json
+{
+  "error": "No numbers remaining in pouch"
+}
+```
+
+**Error Response - Authentication (400 Bad Request):**
+```json
+{
+  "error": "Client ID header (X-Client-ID) is required"
+}
+```
+
+**Notes:**
+- Performs the same extraction logic as manual `next_extraction` in the terminal UI
+- **Security**: Only the special board client (ID: "0000000000000000") is authorized to extract numbers
+- Regular game clients cannot trigger extractions for security and game integrity
+- Automatically updates the board state, scorecard, and marked numbers
+- Follows the coordinated mutex locking pattern to ensure thread safety
+- Returns detailed information about the extraction result
+- `numbers_remaining`: Count of numbers still available in the pouch
+- `total_extracted`: Total numbers extracted so far (including this one)
+- Server logs the extraction with client identification for audit purposes
 
 ## Card Structure
 

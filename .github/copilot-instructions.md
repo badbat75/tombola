@@ -13,7 +13,7 @@ This is a Rust-based multi-binary tombola/bingo game with a client-server archit
 ### Shared State Management
 The server uses `Arc<Mutex<T>>` for thread-safe shared state:
 - `Board`: Tracks extracted numbers and marked positions
-- `Pouch`: Contains remaining numbers to extract (1-90)
+- `Pouch`: Contains numbers available for extraction (1-90)
 - `ScoreCard`: Manages scoring and prize tracking
 - `CardAssignmentManager`: Handles client card assignments
 
@@ -79,7 +79,7 @@ cargo run --bin card_client
 
 ### Real-time Game State
 - GET `/board` - Current extracted numbers
-- GET `/pouch` - Remaining numbers count
+- GET `/pouch` - Available numbers in pouch
 - GET `/scoremap` - Current scores and winners with score map
 
 ### Card Management

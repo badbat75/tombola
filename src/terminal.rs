@@ -96,12 +96,12 @@ pub fn show_on_terminal(
 
 
     // Print scorecard (score_idx, [cardid1, cardid2, ...]) in reverse order
-    if scorecard.scorecard >= 2 {
+    if scorecard.published_score >= 2 {
         println!();
         println!("ScoreCard achievements:");
         let mut achievements: Vec<_> = scorecard.score_map.iter().collect();
         achievements.sort_by(|a, b| b.0.cmp(a.0)); // Sort descending by score_idx
-        for (score_idx, card_ids) in achievements {
+        for (score_idx, score_achievements) in achievements {
             // Mark numbers only if scorecard reaches a NEW goal
             match score_idx {
                 2 => print!("{}TWO in line{}", Colors::yellow(), Colors::reset()),
@@ -111,7 +111,18 @@ pub fn show_on_terminal(
                 x if *x == NUMBERSPERCARD => print!("{}BINGO!!!{}", Colors::yellow(), Colors::reset()),
                 _ => {} // Handle all other cases (do nothing)
             }
-            println!(" -> CardIDs {card_ids:?}");
+            
+            // Display card IDs and their contributing numbers
+            print!(" -> ");
+            for (i, achievement) in score_achievements.iter().enumerate() {
+                if i > 0 { print!(", "); }
+                if achievement.numbers.is_empty() {
+                    print!("Card {} (no numbers)", achievement.card_id);
+                } else {
+                    print!("Card {} (numbers: {:?})", achievement.card_id, achievement.numbers);
+                }
+            }
+            println!();
         }
     }
 
@@ -126,8 +137,13 @@ pub fn show_on_terminal(
     println!();
 }
 
-pub fn hitkey () -> bool {
-    println!("\nPress any key to continue or ESC to exit");
+pub enum KeyAction {
+    Extract,  // Enter key pressed
+    Exit,     // ESC key pressed
+}
+
+pub fn wait_for_extract_or_exit() -> KeyAction {
+    println!("\nPress ENTER to extract a number or ESC to exit");
 
     // Enable raw mode to capture individual key presses
     enable_raw_mode().unwrap();
@@ -144,10 +160,14 @@ pub fn hitkey () -> bool {
             if key_event.kind == event::KeyEventKind::Press {
                 match key_event.code {
                     KeyCode::Esc => {
-                        break true; // Exit the entire program
+                        break KeyAction::Exit; // Exit the entire program
+                    }
+                    KeyCode::Enter => {
+                        break KeyAction::Extract; // Extract a number
                     }
                     _ => {
-                        break false; // Continue with the game
+                        // For any other key, continue waiting
+                        continue;
                     }
                 }
             }
@@ -156,12 +176,6 @@ pub fn hitkey () -> bool {
 
     disable_raw_mode().unwrap();
     print!("\x1Bc"); // Clear the screen
-
-    if result {
-        println!("Exiting the game.\n");
-    } else {
-        println!("Continuing the game...\n");
-    }
 
     result
 }
