@@ -22,6 +22,10 @@ clap = { version = "4", features = ["derive"] }
 
 [profile.release]
 lto = true
+strip = true
+opt-level = 3
+codegen-units = 1
+panic = "abort"
 
 [[bin]]
 name = "tombola-server"

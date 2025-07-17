@@ -301,6 +301,31 @@ impl TombolaClient {
         }
     }
 
+    /// Get running game ID and creation details
+    pub async fn get_game_id(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let url = format!("{}/runninggameid", self.server_url);
+        let response = self
+            .http_client
+            .get(&url)
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let game_info: serde_json::Value = response.json().await?;
+            if let (Some(game_id), Some(created_at)) = (
+                game_info["game_id"].as_str(),
+                game_info["created_at"].as_str()
+            ) {
+                Ok(format!("{}, started at: {}", game_id, created_at))
+            } else {
+                Err("Game ID or creation time not found in response".into())
+            }
+        } else {
+            let error_response: ErrorResponse = response.json().await?;
+            Err(format!("Failed to get game ID: {}", error_response.error).into())
+        }
+    }
+
     /// Start monitoring the game (polls server for updates)
     pub async fn start_monitoring(&self, interval_seconds: u64) -> Result<(), Box<dyn std::error::Error>> {
         self.ensure_registered()?;
@@ -409,6 +434,10 @@ async fn main() {
 
                 // Show timestamp
                 println!("🕐 Last update: {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"));
+
+                // Show Game ID
+                let game_id_info = client.get_game_id().await.unwrap_or_else(|_| "Unknown".to_string());
+                println!("🎮 Game ID: {}", game_id_info);
 
                 // Get the current board (extracted numbers) from the server
                 let extracted_numbers = match client.get_board().await {

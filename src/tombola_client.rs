@@ -72,6 +72,9 @@ pub async fn run_client() -> Result<(), Box<dyn Error>> {
         // Retrieve scorecard data first
         let scorecard_data = get_scoremap(&server_base_url).await?;
         
+        // Retrieve game ID for display
+        let game_id = get_game_id(&server_base_url).await.unwrap_or_else(|_| "Unknown".to_string());
+        
         // Create a board for display purposes and recreate the proper state
         let mut display_board = Board::new();
         
@@ -90,7 +93,7 @@ pub async fn run_client() -> Result<(), Box<dyn Error>> {
         let pouch_data = get_pouch_data(&server_base_url).await?;
         
         // Display current state with client names resolved
-        show_on_terminal_with_client_names(&display_board, &pouch_data, &scorecard_data, &server_base_url).await;
+        show_on_terminal_with_client_names(&display_board, &pouch_data, &scorecard_data, &server_base_url, &game_id).await;
 
         // Check if BINGO has been reached - if so, exit immediately
         if scorecard_data.published_score >= 15 {
@@ -105,8 +108,7 @@ pub async fn run_client() -> Result<(), Box<dyn Error>> {
                 terminal::KeyAction::Extract => {
                     // Extract a number
                     match extract_number(&server_base_url).await {
-                        Ok(extracted) => {
-                            println!("Successfully extracted number: {extracted}");
+                        Ok(_) => {
                             break true; // Continue main loop to refresh display
                         }
                         Err(e) => {
@@ -175,7 +177,6 @@ async fn get_pouch_data(server_base_url: &str) -> Result<Vec<Number>, Box<dyn Er
     
     if response.status().is_success() {
         let pouch: tombola::pouch::Pouch = response.json().await?;
-        println!("Server reports {} numbers remaining in pouch", pouch.len());
         Ok(pouch.numbers)
     } else {
         Err(format!("Server error: {}", response.status()).into())
@@ -195,7 +196,6 @@ async fn extract_number(server_base_url: &str) -> Result<u8, Box<dyn Error>> {
     if response.status().is_success() {
         let extract_response: serde_json::Value = response.json().await?;
         if let Some(extracted_number) = extract_response["extracted_number"].as_u64() {
-            println!("✓ Extracted number: {extracted_number}");
             Ok(extracted_number as u8)
         } else {
             Err("Invalid response format from extract endpoint".into())
@@ -214,6 +214,25 @@ async fn get_scoremap(server_base_url: &str) -> Result<tombola::score::ScoreCard
     if response.status().is_success() {
         let scorecard: tombola::score::ScoreCard = response.json().await?;
         Ok(scorecard)
+    } else {
+        Err(format!("Server error: {}", response.status()).into())
+    }
+}
+
+async fn get_game_id(server_base_url: &str) -> Result<String, Box<dyn Error>> {
+    let url = format!("{server_base_url}/runninggameid");
+    let response = reqwest::get(&url).await?;
+    
+    if response.status().is_success() {
+        let game_info: serde_json::Value = response.json().await?;
+        if let (Some(game_id), Some(created_at)) = (
+            game_info["game_id"].as_str(),
+            game_info["created_at"].as_str()
+        ) {
+            Ok(format!("{}, started at: {}", game_id, created_at))
+        } else {
+            Err("Game ID or creation time not found in response".into())
+        }
     } else {
         Err(format!("Server error: {}", response.status()).into())
     }
@@ -247,7 +266,12 @@ async fn show_on_terminal_with_client_names(
     pouch: &[Number],
     scorecard: &tombola::score::ScoreCard,
     server_base_url: &str,
+    game_id: &str,
 ) {
+    // Display Game ID first
+    println!("Game ID: {}", game_id);
+    println!();
+    
     // Get the last extracted number from the board
     let extracted = board.get_numbers().last().copied().unwrap_or(0);
 
