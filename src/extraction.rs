@@ -7,7 +7,6 @@ use crate::pouch::Pouch;
 use crate::board::Board;
 use crate::score::ScoreCard;
 use crate::card::CardAssignmentManager;
-use crate::client::ClientRegistry;
 
 // Core extraction function that handles the game logic
 pub fn perform_extraction(
@@ -15,7 +14,6 @@ pub fn perform_extraction(
     board_ref: &Arc<Mutex<Board>>,
     scorecard_ref: &Arc<Mutex<ScoreCard>>,
     card_manager: &Arc<Mutex<CardAssignmentManager>>,
-    client_registry: &ClientRegistry,
     current_working_score: Number,
 ) -> Result<(Number, Number), String> {
     // Open pouch mutex once for empty check and extraction
@@ -56,7 +54,7 @@ pub fn perform_extraction(
         if let Ok(card_assignments_manager) = card_manager.lock() {
             if let Ok(mut scorecard) = scorecard_ref.lock() {
                 if let Ok(board) = board_ref.lock() {
-                    scorecard.calculate_and_update_best_score(&board, &card_assignments_manager, client_registry, current_working_score)
+                    scorecard.calculate_and_update_best_score(&board, &card_assignments_manager, current_working_score)
                 } else {
                     return Err("Failed to acquire board lock for scoring".to_string());
                 }

@@ -28,6 +28,7 @@ Most endpoints require client authentication via the `X-Client-ID` header. Clien
 - `Number`: 8-bit unsigned integer (u8) representing tombola numbers (1-90)
 - `Card`: 3x9 grid where each cell can contain a number or be empty (represented as `Option<u8>`)
 - `ScoreAchievement`: Object containing achievement details
+  - `client_id`: String identifier for the client that achieved the score
   - `card_id`: String identifier for the card that achieved the score
   - `numbers`: Array of numbers that directly contributed to the achievement
 
@@ -84,7 +85,7 @@ Register a new client with the tombola server.
 
 #### GET /client/{client_name}
 
-Retrieve information about a registered client.
+Retrieve information about a registered client by name.
 
 **Path Parameters:**
 - `client_name`: Name of the client to retrieve
@@ -98,6 +99,27 @@ Retrieve information about a registered client.
   "registered_at": "SystemTime representation"
 }
 ```
+
+#### GET /clientbyid/{client_id}
+
+Retrieve information about a registered client by client ID.
+
+**Path Parameters:**
+- `client_id`: Client ID of the client to retrieve
+
+**Response:**
+```json
+{
+  "client_id": "A1B2C3D4E5F6G7H8",
+  "name": "client_name",
+  "client_type": "player",
+  "registered_at": "SystemTime representation"
+}
+```
+
+**Notes:**
+- Returns the same information as `/client/{client_name}` but uses client ID for lookup
+- Useful for resolving client names from client IDs in ScoreAchievement data
 
 ### 3. Card Management
 
@@ -232,26 +254,26 @@ Get the current scorecard and score map (prize tracking information).
   "score_map": {
     "2": [
       {
-        "client_name": "Alice",
-        "card_id": "A1B2C3D4E5F6G7H8",
+        "client_id": "A1B2C3D4E5F6G7H8",
+        "card_id": "card_abc123",
         "numbers": [15, 23]
       }
     ],
     "3": [
       {
-        "client_name": "Alice",
-        "card_id": "A1B2C3D4E5F6G7H8", 
+        "client_id": "A1B2C3D4E5F6G7H8",
+        "card_id": "card_abc123", 
         "numbers": [15, 23, 37]
       },
       {
-        "client_name": "Board",
+        "client_id": "0000000000000000",
         "card_id": "0000000000000000",
         "numbers": [15, 23, 37]
       }
     ],
     "5": [
       {
-        "client_name": "Board",
+        "client_id": "0000000000000000",
         "card_id": "0000000000000000",
         "numbers": [15, 23, 37, 41, 52]
       }
@@ -265,7 +287,7 @@ Get the current scorecard and score map (prize tracking information).
 - `published_score`: The highest score achieved so far (current published achievement level)
 - `score_map`: Map of score indices to arrays of ScoreAchievement objects
 - Each ScoreAchievement contains:
-  - `client_name`: The name of the client who achieved the score (or "Board" for board achievements)
+  - `client_id`: The ID of the client who achieved the score (or "0000000000000000" for board achievements)
   - `card_id`: The ID of the card that achieved the score (or "0000000000000000" for board achievements)
   - `numbers`: Array of specific numbers that contributed to achieving that score level
 - Returns `published_score: 0` if no achievements have been recorded yet
@@ -275,6 +297,7 @@ Get the current scorecard and score map (prize tracking information).
 - For line achievements, `numbers` contains only the numbers from the winning line
 - For BINGO achievements, `numbers` contains all 15 numbers that completed the card
 - Empty score_map `{}` if no scores have been recorded yet
+- To get client names from client IDs, use the `/clientbyid/{client_id}` endpoint
 
 #### GET /status
 
@@ -444,9 +467,14 @@ curl -X POST http://127.0.0.1:3000/register \
   -d '{"name": "player2", "client_type": "player", "nocard": 6}'
 ```
 
-3. **Get client information:**
+3. **Get client information by name:**
 ```bash
 curl http://127.0.0.1:3000/client/player1
+```
+
+3a. **Get client information by ID:**
+```bash
+curl http://127.0.0.1:3000/clientbyid/A1B2C3D4E5F6G7H8
 ```
 
 4. **List assigned cards:**

@@ -89,8 +89,8 @@ pub async fn run_client() -> Result<(), Box<dyn Error>> {
         // Retrieve pouch data
         let pouch_data = get_pouch_data(&server_base_url).await?;
         
-        // Display current state
-        terminal::show_on_terminal(&display_board, &pouch_data, &scorecard_data);
+        // Display current state with client names resolved
+        show_on_terminal_with_client_names(&display_board, &pouch_data, &scorecard_data, &server_base_url).await;
 
         // Check if BINGO has been reached - if so, exit immediately
         if scorecard_data.published_score >= 15 {
@@ -217,6 +217,93 @@ async fn get_scoremap(server_base_url: &str) -> Result<tombola::score::ScoreCard
     } else {
         Err(format!("Server error: {}", response.status()).into())
     }
+}
+
+async fn get_client_name_by_id(server_base_url: &str, client_id: &str) -> Result<String, Box<dyn Error>> {
+    // Handle special board client ID
+    if client_id == "0000000000000000" {
+        return Ok("Board".to_string());
+    }
+    
+    let url = format!("{}/clientbyid/{}", server_base_url, client_id);
+    let response = reqwest::get(&url).await?;
+    
+    if response.status().is_success() {
+        let client_info: serde_json::Value = response.json().await?;
+        if let Some(name) = client_info["name"].as_str() {
+            Ok(name.to_string())
+        } else {
+            Ok(format!("Unknown({})", client_id))
+        }
+    } else {
+        // Fallback to showing the client ID if lookup fails
+        Ok(format!("ID:{}", client_id))
+    }
+}
+
+// Custom terminal display function that resolves client names for achievements
+async fn show_on_terminal_with_client_names(
+    board: &Board,
+    pouch: &[Number],
+    scorecard: &tombola::score::ScoreCard,
+    server_base_url: &str,
+) {
+    // Get the last extracted number from the board
+    let extracted = board.get_numbers().last().copied().unwrap_or(0);
+
+    println!("Last number: {}{extracted}{}", tombola::defs::Colors::green(), tombola::defs::Colors::reset());
+    println!("Previous numbers: {:?}", tombola::terminal::print_last_numbers(board, 3));
+    println!("\nCurrent board:");
+    tombola::terminal::print_board(board);
+    println!();
+
+    // Print scorecard with client names resolved
+    if scorecard.published_score >= 2 {
+        println!();
+        println!("ScoreCard achievements:");
+        let mut achievements: Vec<_> = scorecard.score_map.iter().collect();
+        achievements.sort_by(|a, b| b.0.cmp(a.0)); // Sort descending by score_idx
+        for (score_idx, score_achievements) in achievements {
+            // Mark numbers only if scorecard reaches a NEW goal
+            match score_idx {
+                2 => print!("{}TWO in line{}", tombola::defs::Colors::yellow(), tombola::defs::Colors::reset()),
+                3 => print!("{}THREE in line{}", tombola::defs::Colors::yellow(), tombola::defs::Colors::reset()),
+                4 => print!("{}FOUR in line{}", tombola::defs::Colors::yellow(), tombola::defs::Colors::reset()),
+                5 => print!("{}FIVE in line{}", tombola::defs::Colors::yellow(), tombola::defs::Colors::reset()),
+                x if *x == tombola::defs::NUMBERSPERCARD => print!("{}BINGO!!!{}", tombola::defs::Colors::yellow(), tombola::defs::Colors::reset()),
+                _ => {} // Handle all other cases (do nothing)
+            }
+            
+            // Display card IDs with resolved client names and their contributing numbers
+            print!(" -> ");
+            for (i, achievement) in score_achievements.iter().enumerate() {
+                if i > 0 { print!(", "); }
+                
+                // Resolve client name
+                let client_name = match get_client_name_by_id(server_base_url, &achievement.client_id).await {
+                    Ok(name) => name,
+                    Err(_) => format!("ID:{}", achievement.client_id),
+                };
+                
+                if achievement.numbers.is_empty() {
+                    print!("{} [{}] (no numbers)", client_name, achievement.card_id);
+                } else {
+                    print!("{} [{}] (numbers: {:?})", client_name, achievement.card_id, achievement.numbers);
+                }
+            }
+            println!();
+        }
+    }
+
+    if !pouch.is_empty() { 
+        println!("\nRemaining in pouch {}:", pouch.len());
+        for &pouch_num in pouch {
+            print!("{pouch_num:2} ");
+        }
+        println!();
+    }
+
+    println!();
 }
 
 async fn call_newgame(server_base_url: &str) -> Result<(), Box<dyn Error>> {

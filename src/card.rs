@@ -585,4 +585,17 @@ impl CardAssignmentManager {
         }
         "Unknown".to_string()
     }
+
+    // Helper function to get client ID from card ID
+    pub fn get_client_id_for_card(&self, card_id: &str) -> String {
+        if card_id == "0000000000000000" {
+            return "0000000000000000".to_string(); // Special ID for board
+        }
+        
+        if let Some(assignment) = self.get_card_assignment(card_id) {
+            return assignment.client_id.clone();
+        }
+        "Unknown".to_string()
+    }
+
 }

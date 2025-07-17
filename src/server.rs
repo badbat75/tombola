@@ -16,7 +16,7 @@ use crate::board::Board;
 use crate::pouch::Pouch;
 use crate::score::ScoreCard;
 use crate::defs::Number;
-use crate::client::{RegisterRequest, RegisterResponse, ClientInfoResponse, ClientInfo, ClientRegistry, generate_client_id};
+use crate::client::{RegisterRequest, RegisterResponse, ClientInfoResponse, ClientInfo, ClientRegistry};
 use crate::card::{CardAssignmentManager, GenerateCardsRequest, GenerateCardsResponse, CardInfo, ListAssignedCardsResponse, AssignedCardInfo};
 use crate::config::ServerConfig;
 
@@ -115,6 +115,10 @@ async fn handle_request(
             let client_name = &path[8..]; // Remove "/client/" prefix
             handle_client_info(client_name, client_registry).await
         }
+        (&Method::GET, path) if path.starts_with("/clientbyid/") => {
+            let client_id = &path[12..]; // Remove "/clientbyid/" prefix
+            handle_client_info_by_id(client_id, client_registry).await
+        }
         (&Method::POST, "/generatecardsforme") => {
             handle_generate_cards(req, client_registry, card_manager).await
         }
@@ -191,8 +195,12 @@ async fn handle_register(
         }
     };
 
-    // Generate client ID
-    let client_id = generate_client_id(&register_request.name, &register_request.client_type);
+    // Create client info first
+    let client_info = ClientInfo::new(
+        register_request.name.clone(),
+        register_request.client_type.clone(),
+    );
+    let client_id = client_info.id.clone();
 
     // Check if client already exists and return existing info
     if let Ok(mut registry) = client_registry.lock() {
@@ -211,13 +219,6 @@ async fn handle_register(
         }
 
         // Store new client information (using name as key)
-        let client_info = ClientInfo {
-            id: client_id.clone(),
-            name: register_request.name.clone(),
-            client_type: register_request.client_type.clone(),
-            registered_at: std::time::SystemTime::now(),
-        };
-
         registry.insert(register_request.name.clone(), client_info);
         println!("✅ Client registered: {} (ID: {})", register_request.name, client_id);
     }
@@ -297,6 +298,70 @@ async fn handle_client_info(
     // Client not found
     let error_response = ErrorResponse {
         error: format!("Client '{client_name}' not found"),
+    };
+    let body = serde_json::to_string(&error_response).unwrap_or_else(|_| "{}".to_string());
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .header("Content-Type", "application/json")
+        .header("Access-Control-Allow-Origin", "*")
+        .body(Full::new(Bytes::from(body)))
+        .unwrap()
+}
+
+// Function to get client information by ID
+async fn handle_client_info_by_id(
+    client_id: &str,
+    client_registry: ClientRegistry,
+) -> Response<Full<Bytes>> {
+    // Use ClientInfo method to resolve client name (handles both special board case and regular clients)
+    let client_name = ClientInfo::get_client_name_by_id(client_id, &client_registry)
+        .unwrap_or_else(|| "Unknown".to_string());
+
+    // Handle special case for board client ID
+    if client_name == "Board" {
+        let client_response = ClientInfoResponse {
+            client_id: client_id.to_string(),
+            name: "Board".to_string(),
+            client_type: "board".to_string(),
+            registered_at: "System".to_string(),
+        };
+        
+        let body = serde_json::to_string(&client_response).unwrap_or_else(|_| "{}".to_string());
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/json")
+            .header("Access-Control-Allow-Origin", "*")
+            .body(Full::new(Bytes::from(body)))
+            .unwrap();
+    }
+
+    // Handle regular clients - if CardAssignmentManager found a name, look up full client info
+    if client_name != "Unknown" {
+        if let Ok(registry) = client_registry.lock() {
+            for client_info in registry.values() {
+                if client_info.name == client_name {
+                    let client_response = ClientInfoResponse {
+                        client_id: client_info.id.clone(),
+                        name: client_info.name.clone(),
+                        client_type: client_info.client_type.clone(),
+                        registered_at: format!("{:?}", client_info.registered_at),
+                    };
+                    
+                    let body = serde_json::to_string(&client_response).unwrap_or_else(|_| "{}".to_string());
+                    return Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", "application/json")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(Full::new(Bytes::from(body)))
+                        .unwrap();
+                }
+            }
+        }
+    }
+    
+    // Client not found
+    let error_response = ErrorResponse {
+        error: format!("Client with ID '{client_id}' not found"),
     };
     let body = serde_json::to_string(&error_response).unwrap_or_else(|_| "{}".to_string());
     Response::builder()
@@ -730,7 +795,7 @@ async fn handle_extract(
     pouch_ref: Arc<Mutex<Pouch>>,
     scorecard_ref: Arc<Mutex<ScoreCard>>,
     card_manager: Arc<Mutex<CardAssignmentManager>>,
-    registry: ClientRegistry,
+    #[allow(unused_variables)] registry: ClientRegistry,
 ) -> Response<Full<Bytes>> {
     // Get client ID from headers for authentication
     let client_id = match req.headers().get("X-Client-ID") {
@@ -796,7 +861,7 @@ async fn handle_extract(
     }
 
     // Extract a number using the shared extraction logic
-    match perform_extraction(&pouch_ref, &board_ref, &scorecard_ref, &card_manager, &registry, 0) {
+    match perform_extraction(&pouch_ref, &board_ref, &scorecard_ref, &card_manager, 0) {
         Ok((extracted_number, _new_working_score)) => {
             // Get current pouch and board state for response
             let numbers_remaining = if let Ok(pouch) = pouch_ref.lock() {
