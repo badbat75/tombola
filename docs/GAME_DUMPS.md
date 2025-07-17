@@ -11,8 +11,8 @@ This feature automatically dumps the complete game state to JSON files when game
 ## File Location and Naming
 
 - **Directory**: `data/games/`
-- **Filename Format**: `{game_id}_{timestamp}.json`
-- **Example**: `game_1a2b3c4d_20250717_143022.json`
+- **Filename Format**: `{game_id}.json`
+- **Example**: `game_1a2b3c4d.json`
 
 ## JSON Structure
 
