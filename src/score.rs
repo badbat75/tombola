@@ -125,7 +125,7 @@ impl ScoreCard {
             
             // Only include cards that have achieved a meaningful score (>= 2) and have contributing numbers
             if card_score >= 2 && !contributing_numbers.is_empty() {
-                card_details.push((card_id.clone(), contributing_numbers));
+                card_details.push((card_id.to_string(), contributing_numbers));
             }
         }
         
@@ -283,7 +283,7 @@ impl ScoreCard {
                         if card_numbers_found == NUMBERSPERCARD {
                             return (new_scorecard, board_numbers.iter()
                                 .filter(|&num| card_numbers.contains(num))
-                                .cloned()
+                                .copied()
                                 .collect());
                         }
                     }
@@ -334,8 +334,8 @@ impl ScoreCard {
                             .map(|(card_id, numbers)| {
                                 ScoreAchievement {
                                     client_id: card_manager.get_client_id_for_card(card_id),
-                                    card_id: card_id.clone(),
-                                    numbers: numbers.clone(),
+                                    card_id: card_id.to_string(),
+                                    numbers: numbers.to_vec(),
                                 }
                             }).collect()
                     } else if boardscore_value == NUMBERSPERCARD {
@@ -343,7 +343,7 @@ impl ScoreCard {
                         vec![ScoreAchievement {
                             client_id: "0000000000000000".to_string(),
                             card_id: "0000000000000000".to_string(),
-                            numbers: board_numbers_contributing.clone(),
+                            numbers: board_numbers_contributing.to_vec(),
                         }]
                     } else {
                         Vec::new()
@@ -357,8 +357,8 @@ impl ScoreCard {
                     // This ensures we don't lose previous achievements when reaching a higher level
                     
                     for achievement_level in 2..=bestscore {
-                        // Only add this level if it doesn't already exist in score_map
-                        if !self.score_map.contains_key(&achievement_level) {
+                        // Use entry API to avoid double lookup
+                        if let std::collections::hash_map::Entry::Vacant(e) = self.score_map.entry(achievement_level) {
                             let level_achievements = if achievement_level == bestscore {
                                 // For the current best score, use the actual current achievements
                                 if allcardscore_value >= boardscore_value {
@@ -368,8 +368,8 @@ impl ScoreCard {
                                         .map(|(card_id, numbers)| {
                                             ScoreAchievement {
                                                 client_id: card_manager.get_client_id_for_card(card_id),
-                                                card_id: card_id.clone(),
-                                                numbers: numbers.clone(),
+                                                card_id: card_id.to_string(),
+                                                numbers: numbers.to_vec(),
                                             }
                                         }).collect();
                                     
@@ -378,7 +378,7 @@ impl ScoreCard {
                                         achievements.push(ScoreAchievement {
                                             client_id: "0000000000000000".to_string(),
                                             card_id: "0000000000000000".to_string(),
-                                            numbers: board_numbers_contributing.clone(),
+                                            numbers: board_numbers_contributing.to_vec(),
                                         });
                                     }
                                     achievements
@@ -387,7 +387,7 @@ impl ScoreCard {
                                     vec![ScoreAchievement {
                                         client_id: "0000000000000000".to_string(),
                                         card_id: "0000000000000000".to_string(),
-                                        numbers: board_numbers_contributing.clone(),
+                                        numbers: board_numbers_contributing.to_vec(),
                                     }]
                                 } else {
                                     Vec::new()
@@ -407,7 +407,7 @@ impl ScoreCard {
                                             .collect();
                                         level_achievements.push(ScoreAchievement {
                                             client_id: card_manager.get_client_id_for_card(card_id),
-                                            card_id: card_id.clone(),
+                                            card_id: card_id.to_string(),
                                             numbers: level_numbers,
                                         });
                                     }
@@ -431,7 +431,7 @@ impl ScoreCard {
                             };
                             
                             if !level_achievements.is_empty() {
-                                self.score_map.insert(achievement_level, level_achievements);
+                                e.insert(level_achievements);
                             }
                         }
                     }

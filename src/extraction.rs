@@ -34,19 +34,17 @@ pub fn perform_extraction(
     }
     
     // Perform all board operations in a coordinated manner
-    {
-        // Keep board and scorecard locks open for the entire operation
-        if let Ok(mut board) = board_ref.lock() {
-            if let Ok(scorecard) = scorecard_ref.lock() {
-                // Add the extracted number to the board (includes scoring and marking)
-                board.push(extracted, &scorecard);
-            } else {
-                return Err("Failed to acquire scorecard lock".to_string());
-            }
+    // Keep board and scorecard locks open for the entire operation
+    if let Ok(mut board) = board_ref.lock() {
+        if let Ok(scorecard) = scorecard_ref.lock() {
+            // Add the extracted number to the board (includes scoring and marking)
+            board.push(extracted, &scorecard);
         } else {
-            return Err("Failed to acquire board lock".to_string());
+            return Err("Failed to acquire scorecard lock".to_string());
         }
-    }; // Both locks are released here
+    } else {
+        return Err("Failed to acquire board lock".to_string());
+    } // Both locks are released here
 
     // Calculate scores for all cards - keep all needed locks open
     let new_working_score = {

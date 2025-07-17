@@ -111,7 +111,7 @@ impl ClientRegistry {
         
         for client_info in self.clients.values() {
             if client_info.id == client_id {
-                return Some(client_info.name.clone());
+                return Some(client_info.name.to_string());
             }
         }
         None

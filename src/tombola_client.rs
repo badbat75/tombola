@@ -106,7 +106,7 @@ pub async fn run_client() -> Result<(), Box<dyn Error>> {
                     // Extract a number
                     match extract_number(&server_base_url).await {
                         Ok(extracted) => {
-                            println!("Successfully extracted number: {}", extracted);
+                            println!("Successfully extracted number: {extracted}");
                             break true; // Continue main loop to refresh display
                         }
                         Err(e) => {
@@ -116,7 +116,7 @@ pub async fn run_client() -> Result<(), Box<dyn Error>> {
                                 println!("The game has ended. No more numbers can be extracted.");
                                 break false; // Exit the main loop
                             } else {
-                                eprintln!("Error extracting number: {}", e);
+                                eprintln!("Error extracting number: {e}");
                                 // Continue waiting for user input
                                 continue;
                             }
@@ -147,7 +147,7 @@ pub async fn run_client() -> Result<(), Box<dyn Error>> {
 }
 
 async fn test_server_connection(server_base_url: &str) -> Result<(), Box<dyn Error>> {
-    let url = format!("{}/status", server_base_url);
+    let url = format!("{server_base_url}/status");
     let response = reqwest::get(&url).await?;
     
     if response.status().is_success() {
@@ -158,7 +158,7 @@ async fn test_server_connection(server_base_url: &str) -> Result<(), Box<dyn Err
 }
 
 async fn get_board_data(server_base_url: &str) -> Result<Vec<Number>, Box<dyn Error>> {
-    let url = format!("{}/board", server_base_url);
+    let url = format!("{server_base_url}/board");
     let response = reqwest::get(&url).await?;
     
     if response.status().is_success() {
@@ -170,7 +170,7 @@ async fn get_board_data(server_base_url: &str) -> Result<Vec<Number>, Box<dyn Er
 }
 
 async fn get_pouch_data(server_base_url: &str) -> Result<Vec<Number>, Box<dyn Error>> {
-    let url = format!("{}/pouch", server_base_url);
+    let url = format!("{server_base_url}/pouch");
     let response = reqwest::get(&url).await?;
     
     if response.status().is_success() {
@@ -184,7 +184,7 @@ async fn get_pouch_data(server_base_url: &str) -> Result<Vec<Number>, Box<dyn Er
 
 async fn extract_number(server_base_url: &str) -> Result<u8, Box<dyn Error>> {
     let client = reqwest::Client::new();
-    let url = format!("{}/extract", server_base_url);
+    let url = format!("{server_base_url}/extract");
     
     let response = client
         .post(&url)
@@ -195,7 +195,7 @@ async fn extract_number(server_base_url: &str) -> Result<u8, Box<dyn Error>> {
     if response.status().is_success() {
         let extract_response: serde_json::Value = response.json().await?;
         if let Some(extracted_number) = extract_response["extracted_number"].as_u64() {
-            println!("✓ Extracted number: {}", extracted_number);
+            println!("✓ Extracted number: {extracted_number}");
             Ok(extracted_number as u8)
         } else {
             Err("Invalid response format from extract endpoint".into())
@@ -203,12 +203,12 @@ async fn extract_number(server_base_url: &str) -> Result<u8, Box<dyn Error>> {
     } else {
         let status = response.status();
         let error_text = response.text().await?;
-        Err(format!("Failed to extract number: {} - {}", status, error_text).into())
+        Err(format!("Failed to extract number: {status} - {error_text}").into())
     }
 }
 
 async fn get_scoremap(server_base_url: &str) -> Result<tombola::score::ScoreCard, Box<dyn Error>> {
-    let url = format!("{}/scoremap", server_base_url);
+    let url = format!("{server_base_url}/scoremap");
     let response = reqwest::get(&url).await?;
     
     if response.status().is_success() {
@@ -225,7 +225,7 @@ async fn get_client_name_by_id(server_base_url: &str, client_id: &str) -> Result
         return Ok("Board".to_string());
     }
     
-    let url = format!("{}/clientbyid/{}", server_base_url, client_id);
+    let url = format!("{server_base_url}/clientbyid/{client_id}");
     let response = reqwest::get(&url).await?;
     
     if response.status().is_success() {
@@ -233,11 +233,11 @@ async fn get_client_name_by_id(server_base_url: &str, client_id: &str) -> Result
         if let Some(name) = client_info["name"].as_str() {
             Ok(name.to_string())
         } else {
-            Ok(format!("Unknown({})", client_id))
+            Ok(format!("Unknown({client_id})"))
         }
     } else {
         // Fallback to showing the client ID if lookup fails
-        Ok(format!("ID:{}", client_id))
+        Ok(format!("ID:{client_id}"))
     }
 }
 
@@ -308,7 +308,7 @@ async fn show_on_terminal_with_client_names(
 
 async fn call_newgame(server_base_url: &str) -> Result<(), Box<dyn Error>> {
     let client = reqwest::Client::new();
-    let url = format!("{}/newgame", server_base_url);
+    let url = format!("{server_base_url}/newgame");
     
     println!("🔄 Initiating new game...");
     
@@ -323,13 +323,13 @@ async fn call_newgame(server_base_url: &str) -> Result<(), Box<dyn Error>> {
         let newgame_response: serde_json::Value = response.json().await?;
         
         if let Some(message) = newgame_response["message"].as_str() {
-            println!("✓ {}", message);
+            println!("✓ {message}");
         }
         
         if let Some(components) = newgame_response["reset_components"].as_array() {
             for component in components {
                 if let Some(component_str) = component.as_str() {
-                    println!("  - {}", component_str);
+                    println!("  - {component_str}");
                 }
             }
         }
@@ -339,7 +339,7 @@ async fn call_newgame(server_base_url: &str) -> Result<(), Box<dyn Error>> {
     } else {
         let status = response.status();
         let error_text = response.text().await?;
-        Err(format!("Failed to reset game: {} - {}", status, error_text).into())
+        Err(format!("Failed to reset game: {status} - {error_text}").into())
     }
 }
 
@@ -367,14 +367,14 @@ async fn run_client_with_args(args: Args) -> Result<(), Box<dyn Error>> {
     let server_base_url = config.server_url();
     
     println!("Tombola Terminal Client");
-    print!("Connecting to server at {}...", server_base_url);
+    print!("Connecting to server at {server_base_url}...");
 
     // Test server connectivity first
     match test_server_connection(&server_base_url).await {
         Ok(_) => println!("Ok. ✓"),
         Err(e) => {
             eprintln!("Error. ✗ Failed to connect to server: {e}");
-            eprintln!("Make sure the tombola server is running on {}", server_base_url);
+            eprintln!("Make sure the tombola server is running on {server_base_url}");
             return Err(e);
         }
     }
@@ -387,7 +387,7 @@ async fn run_client_with_args(args: Args) -> Result<(), Box<dyn Error>> {
                 // Success message already printed by call_newgame()
             }
             Err(e) => {
-                eprintln!("Failed to reset game: {}", e);
+                eprintln!("Failed to reset game: {e}");
                 eprintln!("Continuing with current game state...");
                 println!();
             }

@@ -71,11 +71,11 @@ impl ClientConfig {
         
         match Self::from_file(config_path) {
             Ok(config) => {
-                println!("📄 Loaded client configuration from {}", config_path);
+                println!("📄 Loaded client configuration from {config_path}");
                 config
             }
             Err(e) => {
-                println!("⚠️  Could not load client config from {}: {}. Using defaults.", config_path, e);
+                println!("⚠️  Could not load client config from {config_path}: {e}. Using defaults.");
                 Self::default()
             }
         }
@@ -107,11 +107,11 @@ impl ServerConfig {
         
         match Self::from_file(config_path) {
             Ok(config) => {
-                println!("📄 Loaded configuration from {}", config_path);
+                println!("📄 Loaded configuration from {config_path}");
                 config
             }
             Err(e) => {
-                println!("⚠️  Could not load config from {}: {}. Using defaults.", config_path, e);
+                println!("⚠️  Could not load config from {config_path}: {e}. Using defaults.");
                 Self::default()
             }
         }

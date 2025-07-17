@@ -1035,7 +1035,7 @@ async fn handle_newgame(
             .unwrap();
     }
 
-    println!("🔄 Game reset initiated via API by client {}", client_id);
+    println!("🔄 Game reset initiated via API by client {client_id}");
 
     // Create success response
     let response = json!({

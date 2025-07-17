@@ -443,22 +443,22 @@ impl CardManagement {
         for card_with_id in cards_with_ids {
             let card_id_str = format!("{:016X}", card_with_id.id);
             
-            // Create assignment
-            let assignment = CardAssignment {
-                card_id: card_id_str.clone(),
-                client_id: client_id.clone(),
-                card_data: card_with_id.card.clone(),
-            };
-            assignments.push(assignment);
-            
-            // Create card info for response
+            // Create card info for response first (takes ownership of card_id_str)
             let card_info = CardInfo {
-                card_id: card_id_str,
+                card_id: card_id_str.clone(),
                 card_data: card_with_id.card.iter().map(|row| {
                     row.to_vec()
                 }).collect(),
             };
             card_infos.push(card_info);
+            
+            // Create assignment (reuse card_id_str, take ownership of card data)
+            let assignment = CardAssignment {
+                card_id: card_id_str,
+                client_id: client_id.clone(),
+                card_data: card_with_id.card,
+            };
+            assignments.push(assignment);
         }
         
         (card_infos, assignments)
@@ -474,25 +474,25 @@ impl CardManagement {
         for card_with_id in cards_with_ids {
             let card_id_str = format!("{:016X}", card_with_id.id);
             
-            // Create assignment
-            let assignment = CardAssignment {
-                card_id: card_id_str.clone(),
-                client_id: client_id.clone(),
-                card_data: card_with_id.card.clone(),
-            };
-            assignments.push(assignment);
-            
             // Add to client's card list
             client_card_ids.push(card_id_str.clone());
             
             // Convert Card to CardInfo for response
             let card_info = CardInfo {
-                card_id: card_id_str,
+                card_id: card_id_str.clone(),
                 card_data: card_with_id.card.iter().map(|row| {
                     row.to_vec()
                 }).collect(),
             };
             card_infos.push(card_info);
+            
+            // Create assignment (takes ownership of remaining values)
+            let assignment = CardAssignment {
+                card_id: card_id_str,
+                client_id: client_id.clone(),
+                card_data: card_with_id.card,
+            };
+            assignments.push(assignment);
         }
         
         (card_infos, client_card_ids, assignments)
@@ -526,7 +526,8 @@ impl CardAssignmentManager {
         
         // Store assignments
         for assignment in assignments {
-            self.assignments.insert(assignment.card_id.clone(), assignment);
+            let card_id = assignment.card_id.clone();
+            self.assignments.insert(card_id, assignment);
         }
         
         // Store client's card IDs
@@ -560,7 +561,7 @@ impl CardAssignmentManager {
             .map(|card_ids| {
                 card_ids.iter().map(|card_id| {
                     AssignedCardInfo {
-                        card_id: card_id.clone(),
+                        card_id: card_id.to_string(),
                         assigned_to: client_id.to_string(),
                     }
                 }).collect()
@@ -577,7 +578,7 @@ impl CardAssignmentManager {
         if let Some(assignment) = self.get_card_assignment(card_id) {
             for client_info in client_registry.values() {
                 if client_info.id == assignment.client_id {
-                    return client_info.name.clone();
+                    return client_info.name.to_string();
                 }
             }
         }
@@ -591,7 +592,7 @@ impl CardAssignmentManager {
         }
         
         if let Some(assignment) = self.get_card_assignment(card_id) {
-            return assignment.client_id.clone();
+            return assignment.client_id.to_string();
         }
         "Unknown".to_string()
     }
