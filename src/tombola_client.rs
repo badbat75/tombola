@@ -359,6 +359,9 @@ async fn main() {
 }
 
 async fn run_client_with_args(args: Args) -> Result<(), Box<dyn Error>> {
+    // Clear the screen first for a clean start
+    print!("\x1Bc");
+    
     // Load client configuration
     let config = ClientConfig::load_or_default();
     let server_base_url = config.server_url();

@@ -2,7 +2,6 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::convert::Infallible;
 use std::net::SocketAddr;
-use std::collections::HashMap;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{body::Bytes, Request, Response, StatusCode, Method};
@@ -33,7 +32,7 @@ struct ErrorResponse {
 pub fn start_server(board_ref: Arc<Mutex<Board>>, pouch_ref: Arc<Mutex<Pouch>>, scorecard_ref: Arc<Mutex<ScoreCard>>, config: ServerConfig) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>, Arc<Mutex<CardAssignmentManager>>) {
     let shutdown_signal = Arc::new(AtomicBool::new(false));
     let shutdown_clone = Arc::clone(&shutdown_signal);
-    let client_registry: ClientRegistry = Arc::new(Mutex::new(HashMap::new()));
+    let client_registry = Arc::new(Mutex::new(ClientRegistry::new()));
     let card_manager: Arc<Mutex<CardAssignmentManager>> = Arc::new(Mutex::new(CardAssignmentManager::new()));
     
     let card_manager_clone = Arc::clone(&card_manager);
@@ -104,7 +103,7 @@ async fn handle_request(
     board_ref: Arc<Mutex<Board>>,
     pouch_ref: Arc<Mutex<Pouch>>,
     scorecard_ref: Arc<Mutex<ScoreCard>>,
-    client_registry: ClientRegistry,
+    client_registry: Arc<Mutex<ClientRegistry>>,
     card_manager: Arc<Mutex<CardAssignmentManager>>,
 ) -> Result<Response<Full<Bytes>>, Infallible> {
     let response = match (req.method(), req.uri().path()) {
@@ -142,7 +141,7 @@ async fn handle_request(
             handle_extract(req, board_ref, pouch_ref, scorecard_ref, card_manager, client_registry).await
         }
         (&Method::POST, "/newgame") => {
-            handle_newgame(req, board_ref, pouch_ref, scorecard_ref, card_manager).await
+            handle_newgame(req, board_ref, pouch_ref, scorecard_ref, card_manager, client_registry).await
         }
         (&Method::GET, "/status") => {
             handle_status(board_ref, scorecard_ref).await
@@ -158,7 +157,7 @@ async fn handle_request(
 // Handle client registration
 async fn handle_register(
     req: Request<hyper::body::Incoming>,
-    client_registry: ClientRegistry,
+    client_registry: Arc<Mutex<ClientRegistry>>,
     card_manager: Arc<Mutex<CardAssignmentManager>>,
 ) -> Response<Full<Bytes>> {
     // Read the request body
@@ -273,7 +272,7 @@ fn get_scorecard_from_scorecard(scorecard_ref: &Arc<Mutex<ScoreCard>>) -> Number
 // Function to get pouch information
 async fn handle_client_info(
     client_name: &str,
-    client_registry: ClientRegistry,
+    client_registry: Arc<Mutex<ClientRegistry>>,
 ) -> Response<Full<Bytes>> {
     // Look up client by name
     if let Ok(registry) = client_registry.lock() {
@@ -311,11 +310,14 @@ async fn handle_client_info(
 // Function to get client information by ID
 async fn handle_client_info_by_id(
     client_id: &str,
-    client_registry: ClientRegistry,
+    client_registry: Arc<Mutex<ClientRegistry>>,
 ) -> Response<Full<Bytes>> {
-    // Use ClientInfo method to resolve client name (handles both special board case and regular clients)
-    let client_name = ClientInfo::get_client_name_by_id(client_id, &client_registry)
-        .unwrap_or_else(|| "Unknown".to_string());
+    // Use ClientRegistry method to resolve client name (handles both special board case and regular clients)
+    let client_name = if let Ok(registry) = client_registry.lock() {
+        registry.get_client_name_by_id(client_id)
+    } else {
+        None
+    }.unwrap_or_else(|| "Unknown".to_string());
 
     // Handle special case for board client ID
     if client_name == "Board" {
@@ -375,7 +377,7 @@ async fn handle_client_info_by_id(
 // Generate cards for a client
 async fn handle_generate_cards(
     req: Request<hyper::body::Incoming>,
-    client_registry: ClientRegistry,
+    client_registry: Arc<Mutex<ClientRegistry>>,
     card_manager: Arc<Mutex<CardAssignmentManager>>,
 ) -> Response<Full<Bytes>> {
     // Get client ID from headers
@@ -520,7 +522,7 @@ async fn handle_generate_cards(
 // List assigned cards for a client
 async fn handle_list_assigned_cards(
     req: Request<hyper::body::Incoming>,
-    client_registry: ClientRegistry,
+    client_registry: Arc<Mutex<ClientRegistry>>,
     card_manager: Arc<Mutex<CardAssignmentManager>>,
 ) -> Response<Full<Bytes>> {
     // Get client ID from headers
@@ -607,7 +609,7 @@ async fn handle_list_assigned_cards(
 // Get a specific assigned card
 async fn handle_get_assigned_card(
     req: Request<hyper::body::Incoming>,
-    client_registry: ClientRegistry,
+    client_registry: Arc<Mutex<ClientRegistry>>,
     card_manager: Arc<Mutex<CardAssignmentManager>>,
     card_id: String,
 ) -> Response<Full<Bytes>> {
@@ -795,7 +797,7 @@ async fn handle_extract(
     pouch_ref: Arc<Mutex<Pouch>>,
     scorecard_ref: Arc<Mutex<ScoreCard>>,
     card_manager: Arc<Mutex<CardAssignmentManager>>,
-    #[allow(unused_variables)] registry: ClientRegistry,
+    #[allow(unused_variables)] registry: Arc<Mutex<ClientRegistry>>,
 ) -> Response<Full<Bytes>> {
     // Get client ID from headers for authentication
     let client_id = match req.headers().get("X-Client-ID") {
@@ -922,6 +924,7 @@ async fn handle_newgame(
     pouch_ref: Arc<Mutex<Pouch>>,
     scorecard_ref: Arc<Mutex<ScoreCard>>,
     card_manager: Arc<Mutex<CardAssignmentManager>>,
+    client_registry: Arc<Mutex<ClientRegistry>>,
 ) -> Response<Full<Bytes>> {
     // Get client ID from headers for authentication
     let client_id = match req.headers().get("X-Client-ID") {
@@ -1005,6 +1008,14 @@ async fn handle_newgame(
         reset_components.push("Card assignments cleared".to_string());
     } else {
         errors.push("Failed to lock card manager for reset".to_string());
+    }
+
+    // Reset ClientRegistry (clear all registered clients)
+    if let Ok(mut registry) = client_registry.lock() {
+        *registry = ClientRegistry::new();
+        reset_components.push("Client registry cleared".to_string());
+    } else {
+        errors.push("Failed to lock client registry for reset".to_string());
     }
 
     // Check if any errors occurred during reset

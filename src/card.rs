@@ -575,11 +575,9 @@ impl CardAssignmentManager {
         }
         
         if let Some(assignment) = self.get_card_assignment(card_id) {
-            if let Ok(registry) = client_registry.lock() {
-                for client_info in registry.values() {
-                    if client_info.id == assignment.client_id {
-                        return client_info.name.clone();
-                    }
+            for client_info in client_registry.values() {
+                if client_info.id == assignment.client_id {
+                    return client_info.name.clone();
                 }
             }
         }
