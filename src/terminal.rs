@@ -140,10 +140,11 @@ pub fn show_on_terminal(
 pub enum KeyAction {
     Extract,  // Enter key pressed
     Exit,     // ESC key pressed
+    Refresh,  // F5 key pressed for screen update
 }
 
-pub fn wait_for_extract_or_exit() -> KeyAction {
-    println!("\nPress ENTER to extract a number or ESC to exit");
+pub fn wait_for_user_action() -> KeyAction {
+    println!("\nPress ENTER to extract a number, F5 to refresh screen, or ESC to exit");
 
     // Enable raw mode to capture individual key presses
     enable_raw_mode().unwrap();
@@ -164,6 +165,9 @@ pub fn wait_for_extract_or_exit() -> KeyAction {
                     }
                     KeyCode::Enter => {
                         break KeyAction::Extract; // Extract a number
+                    }
+                    KeyCode::F(5) => {
+                        break KeyAction::Refresh; // Refresh the screen
                     }
                     _ => {
                         // For any other key, continue waiting

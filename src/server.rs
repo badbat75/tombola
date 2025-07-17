@@ -139,6 +139,9 @@ async fn handle_request(
         (&Method::POST, "/extract") => {
             handle_extract(req, board_ref, pouch_ref, scorecard_ref, card_manager).await
         }
+        (&Method::POST, "/newgame") => {
+            handle_newgame(req, board_ref, pouch_ref, scorecard_ref, card_manager).await
+        }
         (&Method::GET, "/status") => {
             handle_status(board_ref, scorecard_ref).await
         }
@@ -848,6 +851,130 @@ async fn handle_extract(
                 .unwrap()
         }
     }
+}
+
+// Handle newgame endpoint - resets all game state
+async fn handle_newgame(
+    req: Request<hyper::body::Incoming>,
+    board_ref: Arc<Mutex<Board>>,
+    pouch_ref: Arc<Mutex<Pouch>>,
+    scorecard_ref: Arc<Mutex<ScoreCard>>,
+    card_manager: Arc<Mutex<CardAssignmentManager>>,
+) -> Response<Full<Bytes>> {
+    // Get client ID from headers for authentication
+    let client_id = match req.headers().get("X-Client-ID") {
+        Some(header_value) => {
+            match header_value.to_str() {
+                Ok(id) => id.to_string(),
+                Err(_) => {
+                    let error_response = ErrorResponse {
+                        error: "Invalid client ID in header".to_string(),
+                    };
+                    let body = serde_json::to_string(&error_response).unwrap_or_else(|_| "{}".to_string());
+                    return Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .header("Content-Type", "application/json")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(Full::new(Bytes::from(body)))
+                        .unwrap();
+                }
+            }
+        }
+        None => {
+            let error_response = ErrorResponse {
+                error: "Client ID header (X-Client-ID) is required".to_string(),
+            };
+            let body = serde_json::to_string(&error_response).unwrap_or_else(|_| "{}".to_string());
+            return Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .header("Content-Type", "application/json")
+                .header("Access-Control-Allow-Origin", "*")
+                .body(Full::new(Bytes::from(body)))
+                .unwrap();
+        }
+    };
+
+    // Only allow board client (ID: "0000000000000000") to reset the game
+    if client_id != "0000000000000000" {
+        let error_response = ErrorResponse {
+            error: "Unauthorized: Only board client can reset the game".to_string(),
+        };
+        let body = serde_json::to_string(&error_response).unwrap_or_else(|_| "{}".to_string());
+        return Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .header("Content-Type", "application/json")
+            .header("Access-Control-Allow-Origin", "*")
+            .body(Full::new(Bytes::from(body)))
+            .unwrap();
+    }
+
+    // Reset all game structures in coordinated order to prevent deadlocks
+    // Follow the mutex acquisition order: pouch -> board -> scorecard -> card_manager
+    let mut reset_components = Vec::new();
+    let mut errors = Vec::new();
+
+    // Reset Pouch (refill with numbers 1-90)
+    if let Ok(mut pouch) = pouch_ref.lock() {
+        *pouch = Pouch::new();
+        reset_components.push("Pouch refilled with numbers 1-90".to_string());
+    } else {
+        errors.push("Failed to lock pouch for reset".to_string());
+    }
+
+    // Reset Board (clear extracted numbers and marked positions)
+    if let Ok(mut board) = board_ref.lock() {
+        *board = Board::new();
+        reset_components.push("Board state cleared".to_string());
+    } else {
+        errors.push("Failed to lock board for reset".to_string());
+    }
+
+    // Reset ScoreCard (reset published score and score map)
+    if let Ok(mut scorecard) = scorecard_ref.lock() {
+        *scorecard = ScoreCard::new();
+        reset_components.push("Score card reset".to_string());
+    } else {
+        errors.push("Failed to lock scorecard for reset".to_string());
+    }
+
+    // Reset CardAssignmentManager (clear all card assignments)
+    if let Ok(mut card_mgr) = card_manager.lock() {
+        *card_mgr = CardAssignmentManager::new();
+        reset_components.push("Card assignments cleared".to_string());
+    } else {
+        errors.push("Failed to lock card manager for reset".to_string());
+    }
+
+    // Check if any errors occurred during reset
+    if !errors.is_empty() {
+        let error_response = ErrorResponse {
+            error: format!("Game reset partially failed: {}", errors.join(", ")),
+        };
+        let body = serde_json::to_string(&error_response).unwrap_or_else(|_| "{}".to_string());
+        return Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .header("Content-Type", "application/json")
+            .header("Access-Control-Allow-Origin", "*")
+            .body(Full::new(Bytes::from(body)))
+            .unwrap();
+    }
+
+    println!("🔄 Game reset initiated via API by client {}", client_id);
+
+    // Create success response
+    let response = json!({
+        "success": true,
+        "message": "New game started successfully",
+        "reset_components": reset_components
+    });
+
+    let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/json")
+        .header("Access-Control-Allow-Origin", "*")
+        .body(Full::new(Bytes::from(body)))
+        .unwrap()
 }
 
 // Handle 404 not found

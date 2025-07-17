@@ -18,6 +18,7 @@ hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
 http-body-util = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.0", features = ["derive"] }
 
 [[bin]]
 name = "tombola-server"

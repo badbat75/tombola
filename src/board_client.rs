@@ -4,12 +4,27 @@
 // 
 // Interactive Controls:
 // - ENTER: Extract a number using the /extract API endpoint
+// - F5: Refresh screen and re-fetch fresh data from server without extracting
 // - ESC: Exit the client application
+//
+// CLI Options:
+// - --newgame: Reset the game state before starting the client
 
 use std::error::Error;
+use clap::Parser;
 use tombola::defs::Number;
 use tombola::board::Board;
 use tombola::terminal;
+
+#[derive(Parser)]
+#[command(name = "board_client")]
+#[command(about = "Tombola Board Client - Display game state and perform extractions")]
+#[command(version = "0.1.0")]
+struct Args {
+    /// Reset the game state before starting the client
+    #[arg(long)]
+    newgame: bool,
+}
 
 // Function to extract numbers from the highest achievement for highlighting
 // Only emphasizes board client's achievements, and only if no other client has achieved higher
@@ -47,20 +62,6 @@ fn extract_highest_achievement_numbers(scorecard: &tombola::score::ScoreCard) ->
 const SERVER_BASE_URL: &str = "http://127.0.0.1:3000";
 
 pub async fn run_client() -> Result<(), Box<dyn Error>> {
-    println!("Tombola Terminal Client");
-    print!("Connecting to server at {SERVER_BASE_URL}...");
-
-    // Test server connectivity first
-    match test_server_connection().await {
-        Ok(_) => println!("Ok. ✓"),
-        Err(e) => {
-            eprintln!("Error. ✗ Failed to connect to server: {e}");
-            eprintln!("Make sure the tombola server is running on {SERVER_BASE_URL}");
-            return Err(e);
-        }
-    }
-    println!();
-
     // Main game loop
     loop {
         // Retrieve and display current game state
@@ -96,31 +97,45 @@ pub async fn run_client() -> Result<(), Box<dyn Error>> {
             break; // Exit the game loop immediately
         }
 
-        // Wait for user input
-        match terminal::wait_for_extract_or_exit() {
-            terminal::KeyAction::Extract => {
-                // Extract a number
-                match extract_number().await {
-                    Ok(extracted) => {
-                        println!("Successfully extracted number: {}", extracted);
-                    }
-                    Err(e) => {
-                        let error_msg = e.to_string();
-                        if error_msg.contains("BINGO has been reached") {
-                            println!("🎉 GAME OVER: BINGO has been reached! 🎉");
-                            println!("The game has ended. No more numbers can be extracted.");
-                            break; // Exit the game loop
-                        } else {
-                            eprintln!("Error extracting number: {}", e);
-                            // Continue the loop for other types of errors
+        // Wait for user input and handle actions
+        let should_continue = loop {
+            match terminal::wait_for_user_action() {
+                terminal::KeyAction::Extract => {
+                    // Extract a number
+                    match extract_number().await {
+                        Ok(extracted) => {
+                            println!("Successfully extracted number: {}", extracted);
+                            break true; // Continue main loop to refresh display
+                        }
+                        Err(e) => {
+                            let error_msg = e.to_string();
+                            if error_msg.contains("BINGO has been reached") {
+                                println!("🎉 GAME OVER: BINGO has been reached! 🎉");
+                                println!("The game has ended. No more numbers can be extracted.");
+                                break false; // Exit the main loop
+                            } else {
+                                eprintln!("Error extracting number: {}", e);
+                                // Continue waiting for user input
+                                continue;
+                            }
                         }
                     }
                 }
+                terminal::KeyAction::Refresh => {
+                    // Refresh: clear screen and re-fetch fresh data
+                    print!("\x1Bc"); // Clear the screen
+                    println!("🔄 Refreshing game state...");
+                    break true; // Continue main loop to fetch fresh data and redisplay
+                }
+                terminal::KeyAction::Exit => {
+                    println!("Exiting the client.");
+                    break false; // Exit the main loop
+                }
             }
-            terminal::KeyAction::Exit => {
-                println!("Exiting the client.");
-                break;
-            }
+        };
+
+        if !should_continue {
+            break;
         }
     }
 
@@ -202,9 +217,48 @@ async fn get_scoremap() -> Result<tombola::score::ScoreCard, Box<dyn Error>> {
     }
 }
 
+async fn call_newgame() -> Result<(), Box<dyn Error>> {
+    let client = reqwest::Client::new();
+    let url = format!("{SERVER_BASE_URL}/newgame");
+    
+    println!("🔄 Initiating new game...");
+    
+    let response = client
+        .post(&url)
+        .header("X-Client-ID", "0000000000000000") // Board client ID
+        .header("Content-Type", "application/json")
+        .send()
+        .await?;
+    
+    if response.status().is_success() {
+        let newgame_response: serde_json::Value = response.json().await?;
+        
+        if let Some(message) = newgame_response["message"].as_str() {
+            println!("✓ {}", message);
+        }
+        
+        if let Some(components) = newgame_response["reset_components"].as_array() {
+            for component in components {
+                if let Some(component_str) = component.as_str() {
+                    println!("  - {}", component_str);
+                }
+            }
+        }
+        
+        println!(); // Add blank line for readability
+        Ok(())
+    } else {
+        let status = response.status();
+        let error_text = response.text().await?;
+        Err(format!("Failed to reset game: {} - {}", status, error_text).into())
+    }
+}
+
 #[tokio::main]
 async fn main() {
-    match run_client().await {
+    let args = Args::parse();
+    
+    match run_client_with_args(args).await {
         Ok(_) => {
             println!("Client finished successfully.");
         }
@@ -213,4 +267,37 @@ async fn main() {
             std::process::exit(1);
         }
     }
+}
+
+async fn run_client_with_args(args: Args) -> Result<(), Box<dyn Error>> {
+    println!("Tombola Terminal Client");
+    print!("Connecting to server at {SERVER_BASE_URL}...");
+
+    // Test server connectivity first
+    match test_server_connection().await {
+        Ok(_) => println!("Ok. ✓"),
+        Err(e) => {
+            eprintln!("Error. ✗ Failed to connect to server: {e}");
+            eprintln!("Make sure the tombola server is running on {SERVER_BASE_URL}");
+            return Err(e);
+        }
+    }
+    println!();
+
+    // Handle newgame option if requested
+    if args.newgame {
+        match call_newgame().await {
+            Ok(_) => {
+                // Success message already printed by call_newgame()
+            }
+            Err(e) => {
+                eprintln!("Failed to reset game: {}", e);
+                eprintln!("Continuing with current game state...");
+                println!();
+            }
+        }
+    }
+
+    // Run the main client functionality
+    run_client().await
 }

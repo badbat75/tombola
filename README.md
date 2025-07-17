@@ -18,11 +18,13 @@ This project consists of three main binaries:
   - HTTP API for client integration
   - Thread-safe shared state management
   - Card generation with anti-adjacency patterns
+  - Game reset functionality with complete state cleanup
 
 - **Client Components:**
-  - Terminal-based board display client
+  - Terminal-based board display client with CLI options
   - Interactive card management client
   - HTTP API integration with authentication
+  - Command-line game reset capabilities
 
 ## Configuration
 
@@ -44,26 +46,67 @@ cargo run --bin tombola-server
 # Run display-only client
 cargo run --bin board_client
 
+# Run display-only client with game reset
+cargo run --bin board_client -- --newgame
+
 # Run interactive card client  
 cargo run --bin card_client
 ```
+
+## Client Options
+
+### Board Client CLI Options
+
+The `board_client` supports the following command-line options:
+
+- `--newgame`: Reset the game state before starting the client interface
+- `--help`: Display help information
+- `--version`: Display version information
+
+**Examples:**
+```bash
+# Start board client normally
+cargo run --bin board_client
+
+# Start board client with game reset
+cargo run --bin board_client -- --newgame
+
+# Get help information
+cargo run --bin board_client -- --help
+```
+
+**Notes about --newgame option:**
+- Only the board client can reset the game (uses client ID "0000000000000000")
+- Resets all game components: Board, Pouch, ScoreCard, and CardAssignmentManager
+- Displays confirmation of reset components before starting the normal client interface
+- If the reset fails, the client continues with the current game state
+- Equivalent to calling the `/newgame` API endpoint manually
 
 ## HTTP API
 
 The server provides a RESTful HTTP API on `http://127.0.0.1:3000`. See `docs/TOMBOLA_API.md` for complete API documentation.
 
-### Key Endpoints:
-- `POST /register` - Register a new client
-- `GET /board` - Get current extracted numbers
-- `GET /pouch` - Get remaining numbers  
-- `GET /scoremap` - Get current scores and winners
-- `POST /generatecardsforme` - Generate cards for a client
-- `GET /listassignedcards` - List assigned cards
+### Key Features:
+- Client registration and authentication
+- Card generation and assignment
+- Number extraction with authorization controls
+- Game state management and reset functionality
+- Real-time score tracking
 
 ## Server Controls
 
 - **Any key**: Draw next number from pouch
 - **ESC**: Exit server
+
+## Client Controls
+
+### Board Client:
+- **ENTER**: Extract a number from the pouch (when prompted)
+- **F5**: Refresh the screen and update game state without extracting
+- **ESC**: Exit the client
+
+### Card Client:
+- Interactive menu-driven interface for card management
 
 ## Dependencies
 
@@ -73,6 +116,7 @@ The server provides a RESTful HTTP API on `http://127.0.0.1:3000`. See `docs/TOM
 - `hyper` - HTTP server
 - `reqwest` - HTTP client (for client binaries)
 - `serde` - JSON serialization
+- `clap` - Command line argument parsing
 
 ## Development
 

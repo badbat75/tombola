@@ -348,6 +348,60 @@ curl -X POST http://127.0.0.1:3000/extract \
 - `total_extracted`: Total numbers extracted so far (including this one)
 - Server logs the extraction with client identification for audit purposes
 
+#### POST /newgame
+
+Reset all game state to start a new game.
+
+**Authentication Required:** Yes (X-Client-ID header must be "0000000000000000")
+
+**Authorization:** Only the board client with ID "0000000000000000" can reset the game.
+
+**Request:**
+```bash
+curl -X POST http://127.0.0.1:3000/newgame \
+  -H "X-Client-ID: 0000000000000000" \
+  -H "Content-Type: application/json"
+```
+
+**Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "New game started successfully",
+  "reset_components": [
+    "Board state cleared",
+    "Pouch refilled with numbers 1-90",
+    "Score card reset",
+    "Card assignments cleared"
+  ]
+}
+```
+
+**Error Response - Unauthorized Client (403 Forbidden):**
+```json
+{
+  "error": "Unauthorized: Only board client can reset the game"
+}
+```
+
+**Error Response - Authentication (400 Bad Request):**
+```json
+{
+  "error": "Client ID header (X-Client-ID) is required"
+}
+```
+
+**Notes:**
+- Resets all shared game state to initial conditions
+- **Security**: Only the special board client (ID: "0000000000000000") is authorized to reset the game
+- Clears the Board (extracted numbers and marked positions)
+- Refills the Pouch with all numbers from 1-90
+- Resets the ScoreCard to initial state (published_score: 0, empty score_map)
+- Clears all card assignments from CardAssignmentManager
+- Follows the coordinated mutex locking pattern to ensure thread safety
+- Server logs the game reset with client identification for audit purposes
+- All clients will need to re-register and obtain new card assignments after a game reset
+
 ## Card Structure
 
 Tombola cards follow specific rules:
