@@ -29,8 +29,6 @@ async fn main() {
 
     println!("🎯 Tombola Game Server Started");
     println!("📡 API Server running on http://{}:{}", config.host, config.port);
-    println!("🎮 Use board_client for game display");
-    println!("🎲 Use /extract endpoint with board client ID for number extraction");
     println!("🚪 Press Ctrl+C to stop the server");
 
     // Simple main loop - wait for the server to finish or Ctrl+C

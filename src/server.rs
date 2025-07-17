@@ -41,10 +41,7 @@ pub fn start_server(board_ref: Arc<Mutex<Board>>, pouch_ref: Arc<Mutex<Pouch>>, 
     let handle = tokio::spawn(async move {
         let addr = SocketAddr::from((config.host.parse::<std::net::IpAddr>().unwrap_or([127, 0, 0, 1].into()), config.port));
         let listener = match TcpListener::bind(&addr).await {
-            Ok(listener) => {
-                println!("API Server started on http://{}:{}", config.host, config.port);
-                listener
-            }
+            Ok(listener) => listener,
             Err(e) => {
                 eprintln!("Failed to start API server: {e}");
                 return;
@@ -812,8 +809,6 @@ async fn handle_extract(
             } else {
                 0
             };
-            
-            println!("🎯 Number {} extracted via API by client {}", extracted_number, client_id);
             
             // Create success response
             let response = json!({
