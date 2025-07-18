@@ -4,7 +4,7 @@ use std::hash::Hasher;
 use serde::{Deserialize, Serialize};
 
 // Client registration structures
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct RegisterRequest {
     pub name: String,
     pub client_type: String,

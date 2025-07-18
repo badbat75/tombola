@@ -57,8 +57,17 @@ cargo run --bin tombola-client
 # Run display-only client with game reset
 cargo run --bin tombola-client -- --newgame
 
+# Run display-only client in non-interactive mode (exit after display)
+cargo run --bin tombola-client -- --exit
+
 # Run interactive card client  
 cargo run --bin tombola-player
+
+# Run interactive card client with specific settings
+cargo run --bin tombola-player -- --name "Player1" --nocard 3
+
+# Run card client in non-interactive mode (exit after display)
+cargo run --bin tombola-player -- --exit
 ```
 
 ## Client Options
@@ -68,6 +77,7 @@ cargo run --bin tombola-player
 The `tombola-client` supports the following command-line options:
 
 - `--newgame`: Reset the game state before starting the client interface
+- `--exit`: Exit after displaying the current state (no interactive loop)
 - `--help`: Display help information
 - `--version`: Display version information
 
@@ -79,6 +89,12 @@ cargo run --bin tombola-client
 # Start board client with game reset
 cargo run --bin tombola-client -- --newgame
 
+# Display board state once and exit (non-interactive mode)
+cargo run --bin tombola-client -- --exit
+
+# Combine options: reset game and exit after display
+cargo run --bin tombola-client -- --newgame --exit
+
 # Get help information
 cargo run --bin tombola-client -- --help
 ```
@@ -89,6 +105,46 @@ cargo run --bin tombola-client -- --help
 - Displays confirmation of reset components before starting the normal client interface
 - If the reset fails, the client continues with the current game state
 - Equivalent to calling the `/newgame` API endpoint manually
+
+**Notes about --exit option:**
+- Provides non-interactive mode for both board and player clients
+- Displays current game state once and exits immediately
+- Useful for automation, scripting, or status checking
+- Can be combined with other options like --newgame
+
+### Player Client CLI Options
+
+The `tombola-player` supports the following command-line options:
+
+- `--name <NAME>`: Set client name (overrides config file)
+- `--nocard <COUNT>`: Number of cards to request during registration
+- `--exit`: Exit after displaying the current state (no interactive loop)
+- `--help`: Display help information
+- `--version`: Display version information
+
+**Examples:**
+```bash
+# Start player client normally
+cargo run --bin tombola-player
+
+# Start with custom name and specific number of cards
+cargo run --bin tombola-player -- --name "Player1" --nocard 3
+
+# Display player state once and exit (non-interactive mode)
+cargo run --bin tombola-player -- --exit
+
+# Combine options: set name, request cards, and exit after display
+cargo run --bin tombola-player -- --name "TestPlayer" --nocard 2 --exit
+
+# Get help information
+cargo run --bin tombola-player -- --help
+```
+
+**Notes about --exit option:**
+- Provides non-interactive mode for monitoring cards and achievements
+- Displays current game state, cards, and achievements once and exits
+- Useful for automation, status checking, or integration with other tools
+- Can be combined with other options like --name and --nocard
 
 ## HTTP API
 

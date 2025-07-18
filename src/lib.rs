@@ -13,3 +13,4 @@ pub mod extraction;
 pub mod config;
 pub mod logging;
 pub mod game;
+pub mod api_handlers;

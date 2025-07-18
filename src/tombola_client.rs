@@ -25,6 +25,10 @@ struct Args {
     /// Reset the game state before starting the client
     #[arg(long)]
     newgame: bool,
+    
+    /// Exit after displaying the current state (no interactive loop)
+    #[arg(long)]
+    exit: bool,
 }
 
 // Function to extract numbers from the highest achievement for highlighting
@@ -60,6 +64,14 @@ fn extract_highest_achievement_numbers(scorecard: &tombola::score::ScoreCard) ->
 }
 
 pub async fn run_client() -> Result<(), Box<dyn Error>> {
+    run_client_with_exit_flag(false).await
+}
+
+pub async fn run_client_once() -> Result<(), Box<dyn Error>> {
+    run_client_with_exit_flag(true).await
+}
+
+pub async fn run_client_with_exit_flag(exit_after_display: bool) -> Result<(), Box<dyn Error>> {
     // Load client configuration
     let config = ClientConfig::load_or_default();
     let server_base_url = config.server_url();
@@ -100,6 +112,12 @@ pub async fn run_client() -> Result<(), Box<dyn Error>> {
             println!("🎉 GAME OVER: BINGO has been reached! 🎉");
             println!("The game has ended. No more numbers can be extracted.");
             break; // Exit the game loop immediately
+        }
+
+        // If exit_after_display is true, exit after displaying the state once
+        if exit_after_display {
+            println!("State displayed. Exiting as requested.");
+            break;
         }
 
         // Wait for user input and handle actions
@@ -419,5 +437,9 @@ async fn run_client_with_args(args: Args) -> Result<(), Box<dyn Error>> {
     }
 
     // Run the main client functionality
-    run_client().await
+    if args.exit {
+        run_client_once().await
+    } else {
+        run_client().await
+    }
 }

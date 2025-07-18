@@ -7,6 +7,25 @@ use tombola::config::ClientConfig;
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
+use clap::Parser;
+
+#[derive(Parser)]
+#[command(name = env!("CARGO_BIN_NAME"))]
+#[command(about = "Tombola Player Client - Monitor your cards and achievements")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
+struct Args {
+    /// Client name (default from config)
+    #[arg(short, long)]
+    name: Option<String>,
+    
+    /// Number of cards to request during registration
+    #[arg(long)]
+    nocard: Option<u32>,
+    
+    /// Exit after displaying the current state (no interactive loop)
+    #[arg(long)]
+    exit: bool,
+}
 
 // Client registration request
 #[derive(Debug, Serialize)]
@@ -372,34 +391,23 @@ impl TombolaClient {
 async fn main() {
     println!("🚀 Tombola Client Starting...");
 
+    // Parse command line arguments
+    let args = Args::parse();
+
     // Load client configuration
     let config = ClientConfig::load_or_default();
     let server_url = config.server_url();
 
-    // Parse command line arguments
-    let args: Vec<String> = std::env::args().collect();
-    let client_name = args.get(1).unwrap_or(&config.client_name).clone();
+    // Determine client name from args or config
+    let client_name = args.name.unwrap_or_else(|| config.client_name.clone());
 
     // Create and register client
     let mut client = TombolaClient::new(&client_name, &server_url);
 
-    // Check for --nocard option
-    if let Some(nocard_pos) = args.iter().position(|arg| arg == "--nocard") {
-        if let Some(nocard_value) = args.get(nocard_pos + 1) {
-            match nocard_value.parse::<u32>() {
-                Ok(count) => {
-                    client.set_nocard(count);
-                    println!("🎴 Will request {count} cards during registration");
-                }
-                Err(_) => {
-                    println!("❌ Invalid nocard value: '{nocard_value}'. Using default of 1 card.");
-                    client.set_nocard(1);
-                }
-            }
-        } else {
-            println!("❌ --nocard flag requires a number. Using default of 1 card.");
-            client.set_nocard(1);
-        }
+    // Check for nocard option
+    if let Some(nocard_value) = args.nocard {
+        client.set_nocard(nocard_value);
+        println!("🎴 Will request {} cards during registration", nocard_value);
     }
 
     // Register with server
@@ -502,6 +510,12 @@ async fn main() {
                 }
 
                 if scorecard.published_score == NUMBERSPERCARD { return; } // Exit if BINGO achieved;
+
+                // If --exit flag is set, exit after displaying once
+                if args.exit {
+                    println!("\n🚪 Exiting after displaying game state (--exit flag)");
+                    break;
+                }
 
                 // Wait for 2 seconds before next update
                 std::thread::sleep(Duration::from_secs(2));
