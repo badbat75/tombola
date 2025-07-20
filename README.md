@@ -143,6 +143,11 @@ cargo run --bin tombola-player -- --help
 **Notes about --exit option:**
 - Provides non-interactive mode for monitoring cards and achievements
 - Displays current game state, cards, and achievements once and exits
+
+**Card Generation Optimization:**
+- The player client intelligently checks for existing card assignments before generating new cards
+- If cards are already assigned to the client, card generation is skipped even if `--nocard` is specified
+- This optimization reduces unnecessary server requests and improves performance for reconnecting clients
 - Useful for automation, status checking, or integration with other tools
 - Can be combined with other options like --name and --nocard
 

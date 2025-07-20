@@ -127,6 +127,7 @@ Register a new client with the tombola server.
 - **Game State Restriction**: New clients can only be registered when no numbers have been extracted from the pouch
 - Once the first number is extracted, all new registration attempts will fail with a 409 Conflict error
 - This ensures fair play by preventing players from joining mid-game
+- **Client-Side Card Optimization**: Smart clients (like `tombola-player`) will first register without requesting cards, then check if cards are already assigned before generating new ones. This avoids unnecessary card generation requests for already-registered clients.
 - If `nocard` is not specified, the server will automatically generate 1 card for the client by default
 - If `nocard` is specified, the server will generate and assign the requested number of cards to the client
 - If client already exists, returns existing client information

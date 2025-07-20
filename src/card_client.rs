@@ -17,11 +17,11 @@ struct Args {
     /// Client name (default from config)
     #[arg(short, long)]
     name: Option<String>,
-    
+
     /// Number of cards to request during registration
     #[arg(long)]
     nocard: Option<u32>,
-    
+
     /// Exit after displaying the current state (no interactive loop)
     #[arg(long)]
     exit: bool,
@@ -137,11 +137,11 @@ impl TombolaClient {
             let register_response: RegisterResponse = response.json().await?;
             self.client_id = Some(register_response.client_id.clone());
             self.registered = true;
-            
+
             println!("✅ Registration successful!");
             println!("   Client ID: {}", register_response.client_id);
             println!("   Message: {}", register_response.message);
-            
+
             Ok(())
         } else {
             let error_text = response.text().await?;
@@ -172,7 +172,7 @@ impl TombolaClient {
     /// Get the current board state from the server
     pub async fn get_board(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         self.ensure_registered()?;
-        
+
         let url = format!("{}/board", self.server_url);
         let response = self
             .http_client
@@ -193,7 +193,7 @@ impl TombolaClient {
     /// Get the current scorecard from the server
     pub async fn get_scorecard(&self) -> Result<ScoreCard, Box<dyn std::error::Error>> {
         self.ensure_registered()?;
-        
+
         let url = format!("{}/scoremap", self.server_url);
         let response = self
             .http_client
@@ -214,7 +214,7 @@ impl TombolaClient {
     /// Get the current pouch state from the server
     pub async fn get_pouch(&self) -> Result<(Vec<u8>, usize), Box<dyn std::error::Error>> {
         self.ensure_registered()?;
-        
+
         let url = format!("{}/pouch", self.server_url);
         let response = self
             .http_client
@@ -236,10 +236,10 @@ impl TombolaClient {
     /// Generate cards for the client
     pub async fn generate_cards(&self, count: u32) -> Result<GenerateCardsResponse, Box<dyn std::error::Error>> {
         self.ensure_registered()?;
-        
+
         let request = GenerateCardsRequest { count };
         let url = format!("{}/generatecardsforme", self.server_url);
-        
+
         let response = self
             .http_client
             .post(&url)
@@ -260,7 +260,7 @@ impl TombolaClient {
     /// List assigned cards for the client
     pub async fn list_assigned_cards(&self) -> Result<ListAssignedCardsResponse, Box<dyn std::error::Error>> {
         self.ensure_registered()?;
-        
+
         let url = format!("{}/listassignedcards", self.server_url);
         let response = self
             .http_client
@@ -281,7 +281,7 @@ impl TombolaClient {
     /// Get a specific assigned card by ID
     pub async fn get_assigned_card(&self, card_id: &str) -> Result<CardInfo, Box<dyn std::error::Error>> {
         self.ensure_registered()?;
-        
+
         let url = format!("{}/getassignedcard/{}", self.server_url, card_id);
         let response = self
             .http_client
@@ -302,7 +302,7 @@ impl TombolaClient {
     /// Get server status
     pub async fn get_status(&self) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
         self.ensure_registered()?;
-        
+
         let url = format!("{}/status", self.server_url);
         let response = self
             .http_client
@@ -348,15 +348,15 @@ impl TombolaClient {
     /// Start monitoring the game (polls server for updates)
     pub async fn start_monitoring(&self, interval_seconds: u64) -> Result<(), Box<dyn std::error::Error>> {
         self.ensure_registered()?;
-        
+
         println!("🔄 Starting game monitoring (polling every {interval_seconds} seconds)...");
         println!("   Client ID: {}", self.client_id.as_ref().unwrap());
-        
+
         loop {
             match self.get_status().await {
                 Ok(status) => {
                     println!("📊 Server Status: {}", serde_json::to_string_pretty(&status)?);
-                    
+
                     // Also get the current board
                     match self.get_board().await {
                         Ok(board) => {
@@ -371,7 +371,7 @@ impl TombolaClient {
                     println!("❌ Failed to get status: {e}");
                 }
             }
-            
+
             sleep(Duration::from_secs(interval_seconds)).await;
         }
     }
@@ -430,10 +430,28 @@ async fn main() {
                 return;
             }
 
-            println!("\n� Starting live monitoring (updating every 2 seconds)...");
-            println!("�📇 Your Cards ({} total)", assigned_cards.len());
+            println!("\n🔥 Starting live monitoring (updating every 2 seconds)...");
+            println!("📇 Your Cards ({} total)", assigned_cards.len());
             println!("💡 Numbers highlighted in \x1b[1;33myellow\x1b[0m have been extracted from the pouch");
-            println!("🛑 Press Ctrl+C to stop monitoring\n");
+            println!("🛑 Press Ctrl+C to stop monitoring");
+            println!("📋 Final achievements summary will be displayed when exiting\n");
+
+            // Get Game ID once (doesn't change during the game)
+            let game_id_info = client.get_game_id().await.unwrap_or_else(|_| "Unknown".to_string());
+
+            // Get all card details once (card data doesn't change during the game)
+            let mut card_details = Vec::new();
+            for card in &assigned_cards {
+                match client.get_assigned_card(&card.card_id).await {
+                    Ok(card_info) => {
+                        card_details.push(card_info);
+                    }
+                    Err(e) => {
+                        println!("❌ Failed to get card details for {}: {}", card.card_id, e);
+                        std::process::exit(1);
+                    }
+                }
+            }
 
             // Main monitoring loop
             loop {
@@ -443,8 +461,7 @@ async fn main() {
                 // Show timestamp
                 println!("🕐 Last update: {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"));
 
-                // Show Game ID
-                let game_id_info = client.get_game_id().await.unwrap_or_else(|_| "Unknown".to_string());
+                // Show Game ID (cached, doesn't change during game)
                 println!("🎮 Game ID: {game_id_info}");
 
                 // Get the current board (extracted numbers) from the server
@@ -482,22 +499,11 @@ async fn main() {
                 println!("\n📇 Your Cards ({} total):", assigned_cards.len());
 
                 let mut bingo_cards = Vec::new();
-                let mut card_achievements = Vec::new();
 
-                for (index, card) in assigned_cards.iter().enumerate() {
-                    match client.get_assigned_card(&card.card_id).await {
-                        Ok(card_info) => {
-                            let (is_bingo, achievements) = print_card_as_table_with_highlights(index + 1, &card_info.card_id, &card_info.card_data, &extracted_numbers, &scorecard);
-                            if is_bingo {
-                                bingo_cards.push(card_info.card_id.clone());
-                            }
-                            if !achievements.is_empty() {
-                                card_achievements.push((card_info.card_id.clone(), achievements));
-                            }
-                        }
-                        Err(e) => {
-                            println!("   ❌ Failed to get card {} details: {}", index + 1, e);
-                        }
+                for (index, card_info) in card_details.iter().enumerate() {
+                    let (is_bingo, _achievements) = print_card_as_table_with_highlights(index + 1, &card_info.card_id, &card_info.card_data, &extracted_numbers, &scorecard);
+                    if is_bingo {
+                        bingo_cards.push(card_info.card_id.clone());
                     }
                 }
 
@@ -509,11 +515,15 @@ async fn main() {
                     }
                 }
 
-                if scorecard.published_score == NUMBERSPERCARD { return; } // Exit if BINGO achieved;
+                if scorecard.published_score == NUMBERSPERCARD {
+                    dump_client_achievements(&client, &assigned_cards).await;
+                    return; // Exit if BINGO achieved
+                }
 
                 // If --exit flag is set, exit after displaying once
                 if args.exit {
                     println!("\n🚪 Exiting after displaying game state (--exit flag)");
+                    dump_client_achievements(&client, &assigned_cards).await;
                     break;
                 }
 
@@ -528,9 +538,78 @@ async fn main() {
     }
 }
 
+// Function to dump final achievements summary
+async fn dump_client_achievements(client: &TombolaClient, assigned_cards: &[AssignedCardInfo]) {
+    println!("\n🏁 ===== FINAL ACHIEVEMENTS SUMMARY =====");
+    println!("📋 Client: {}", client.client_name);
+
+    // Get final scorecard
+    match client.get_scorecard().await {
+        Ok(scorecard) => {
+            println!("📊 Final Score: {}", scorecard.published_score);
+
+            println!("\n📇 Card Achievements:");
+            let mut cards_with_achievements = 0;
+
+            for (index, card) in assigned_cards.iter().enumerate() {
+                // Get card details
+                match client.get_assigned_card(&card.card_id).await {
+                    Ok(_card_info) => {
+                        // Find ALL achievements for this card (not just highest)
+                        let mut card_achievements = Vec::new();
+
+                        for (score, score_achievements) in scorecard.get_scoremap() {
+                            for achievement in score_achievements {
+                                if achievement.card_id == card.card_id {
+                                    let achievement_text = match score {
+                                        2 => "2 in line".to_string(),
+                                        3 => "3 in line".to_string(),
+                                        4 => "4 in line".to_string(),
+                                        5 => "5 in line".to_string(),
+                                        x if *x == NUMBERSPERCARD => "🎉 BINGO 🎉".to_string(),
+                                        _ => format!("{score} in line"),
+                                    };
+                                    card_achievements.push((*score, achievement_text));
+                                }
+                            }
+                        }
+
+                        // Sort achievements by score to show them in order
+                        card_achievements.sort_by_key(|(score, _)| *score);
+
+                        // Only show cards that have achievements
+                        if !card_achievements.is_empty() {
+                            println!("   Card {} ({}):", index + 1, card.card_id);
+                            for (_, achievement_text) in card_achievements {
+                                println!("     ✅ {achievement_text}");
+                            }
+                            cards_with_achievements += 1;
+                        }
+                    },
+                    Err(e) => {
+                        println!("   Card {} ({}): ❌ Could not fetch card details: {}", index + 1, card.card_id, e);
+                    }
+                }
+            }
+
+            // Show summary of cards with achievements
+            if cards_with_achievements == 0 {
+                println!("   No cards have achievements yet.");
+            } else {
+                println!("\n   📊 {} out of {} cards have achievements.", cards_with_achievements, assigned_cards.len());
+            }
+        },
+        Err(e) => {
+            println!("⚠️  Warning: Could not fetch final scorecard: {e}");
+        }
+    }
+
+    println!("🏁 ======================================\n");
+}
+
 fn print_card_as_table_with_highlights(card_number: usize, card_id: &str, card_data: &[Vec<Option<u8>>], extracted_numbers: &[u8], scorecard: &ScoreCard) -> (bool, Vec<String>) {
     println!("\n┌────────────────────────────────────────────────────────────────────────────────┐");
-    
+
     // Calculate proper spacing for the title to align the right border
     let title_text = format!("Card {card_number} - ID: {card_id}");
     let box_width = 78; // Total width of the box content area (counting the actual characters)
@@ -539,19 +618,19 @@ fn print_card_as_table_with_highlights(card_number: usize, card_id: &str, card_d
     } else {
         0
     };
-    
+
     println!("│ {}{} │", title_text, " ".repeat(padding));
     println!("├────────┬────────┬────────┬────────┬────────┬────────┬────────┬────────┬────────┤");
-    
+
     // Get the numbers that contributed to the highest published score for this card
     let highest_score_numbers = get_highest_score_numbers_for_card(scorecard, card_id);
-    
+
     // Display card numbers, highlighting extracted ones and emphasizing highest score contributors
     let mut all_card_numbers = Vec::new();
-    
+
     for row in card_data.iter() {
         print!("│");
-        
+
         for cell in row {
             match cell {
                 Some(number) => {
@@ -573,17 +652,22 @@ fn print_card_as_table_with_highlights(card_number: usize, card_id: &str, card_d
         }
         println!();
     }
-    
+
     println!("└────────┴────────┴────────┴────────┴────────┴────────┴────────┴────────┴────────┘");
-    
-    // Get achievements from server scorecard instead of calculating locally
+
+    // Get achievements from server scorecard - only show if relevant to current published score
     let mut achievements_for_this_card = Vec::new();
     let mut is_bingo = false;
-    
-    // Check all scores in the scorecard for this card
+    let mut highest_score = 0;
+    let published_score = scorecard.published_score;
+
+    // Check all scores in the scorecard for this card and find the highest
     for (score, score_achievements) in scorecard.get_scoremap() {
         for achievement in score_achievements {
-            if achievement.card_id == card_id {
+            if achievement.card_id == card_id && *score > highest_score {
+                highest_score = *score;
+                achievements_for_this_card.clear(); // Clear lower achievements
+
                 match score {
                     2 => achievements_for_this_card.push("2 in line".to_string()),
                     3 => achievements_for_this_card.push("3 in line".to_string()),
@@ -598,32 +682,34 @@ fn print_card_as_table_with_highlights(card_number: usize, card_id: &str, card_d
             }
         }
     }
-    
-    // Display progress information
-    if is_bingo {
-        println!("\n🎉 \x1b[1;32mBINGO with Card ID {card_id} !!!!\x1b[0m 🎉");
+
+    // Only show achievements if they are relevant to the current published score
+    // Don't show obsolete achievements (e.g., don't show "2 in line" if published score is 4)
+    if highest_score > 0 && published_score > 0 && highest_score < published_score {
+        achievements_for_this_card.clear(); // Clear obsolete achievements
     }
-    
-    // Display achievements from server scorecard
+
+    // Display progress information - BINGO announcement removed (shown in main loop summary)
+
+    // Display current achievement (only if relevant and not obsolete)
     if !achievements_for_this_card.is_empty() {
-        println!("� Server-confirmed achievements:");
-        for achievement in &achievements_for_this_card {
-            println!("   ✅ {achievement}");
+        if let Some(highest_achievement) = achievements_for_this_card.last() {
+            println!("🏆 {highest_achievement}");
         }
     }
-    
+
     (is_bingo, achievements_for_this_card)
 }
 
 // Helper function to get the numbers that contributed to the highest published score for a specific card
 fn get_highest_score_numbers_for_card(scorecard: &ScoreCard, card_id: &str) -> Vec<u8> {
     let published_score = scorecard.published_score;
-    
+
     // If no score has been published, return empty
     if published_score == 0 {
         return Vec::new();
     }
-    
+
     // Look for this card in the score map for the published score
     if let Some(achievements) = scorecard.get_scoremap().get(&published_score) {
         for achievement in achievements {
@@ -632,6 +718,6 @@ fn get_highest_score_numbers_for_card(scorecard: &ScoreCard, card_id: &str) -> V
             }
         }
     }
-    
+
     Vec::new()
 }

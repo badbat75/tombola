@@ -9,13 +9,14 @@
 - Under doc you will find `FLOWS.md` that contains the data flows for the main logics.
 - Always update `README.md` and `docs` when you make changes to the API or game logic.
 - If you need to create test scripts, place them in the `tests/` directory.
-- Run `cargo clippy` when you achieve the objective to lint the code. Apply suggestions to code with `cargo clippy --fix`. Allow --dirty-code if needed.
 - Be concise and clear in your responses.
 - For print statements, use this format: `println!("Hello, {NAME}. Nice to meet you!");`.
 - Prefer references over clones or copies unless necessary.
 - Use Context7 for language references, libraries, and tools and examples.
 - Unless you want to test the business logic do not build the binaries every time, just run `cargo check`.
 - Use consistent types for variables, functions, and structs.
+- Use IDE warnings to guide your code quality.
+- Run `cargo clippy` when you achieve the objective to lint the code. If there are suggestions, apply to code with `cargo clippy --fix`. Allow --dirty-code if needed.
 
 ## Architecture Overview
 
