@@ -66,11 +66,11 @@ pub fn start_server(config: ServerConfig) -> (tokio::task::JoinHandle<()>, Arc<A
             }
         };
 
-        log_info(&format!("Server starting on {}", addr));
+        log_info(&format!("Server starting on {addr}"));
         
         // Use axum::serve to handle the server
         if let Err(err) = axum::serve(listener, app).await {
-            log_error(&format!("Server error: {:?}", err));
+            log_error(&format!("Server error: {err:?}"));
         }
         
         log_info("Server shutdown complete");

@@ -245,7 +245,7 @@ async fn get_game_id(server_base_url: &str) -> Result<String, Box<dyn Error>> {
             game_info["game_id"].as_str(),
             game_info["created_at"].as_str()
         ) {
-            Ok(format!("{}, started at: {}", game_id, created_at))
+            Ok(format!("{game_id}, started at: {created_at}"))
         } else {
             Err("Game ID or creation time not found in response".into())
         }
@@ -285,7 +285,7 @@ async fn show_on_terminal_with_client_names(
     game_id: &str,
 ) {
     // Display Game ID first
-    println!("Game ID: {}", game_id);
+    println!("Game ID: {game_id}");
     println!();
     
     // Get the last extracted number from the board

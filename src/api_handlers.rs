@@ -74,7 +74,7 @@ pub async fn handle_register(
     State(app_state): State<Arc<AppState>>,
     JsonExtractor(request): JsonExtractor<RegisterRequest>,
 ) -> Result<Json<RegisterResponse>, ApiError> {
-    log_info(&format!("Client registration request: {:?}", request));
+    log_info(&format!("Client registration request: {request:?}"));
     
     // Create client info first
     let client_info = ClientInfo::new(
@@ -98,10 +98,10 @@ pub async fn handle_register(
         // Try to register the new client (will fail if numbers have been extracted)
         match registry.insert(request.name.clone(), client_info, numbers_extracted) {
             Ok(_) => {
-                log_info(&format!("Client registered successfully: {}", client_id));
+                log_info(&format!("Client registered successfully: {client_id}"));
             }
             Err(e) => {
-                log_error(&format!("Failed to register client: {}", e));
+                log_error(&format!("Failed to register client: {e}"));
                 return Err(ApiError::new(StatusCode::CONFLICT, e));
             }
         }
@@ -133,7 +133,7 @@ pub async fn handle_client_info(
     Query(params): Query<ClientNameQuery>,
 ) -> Result<Json<ClientInfoResponse>, ApiError> {
     let client_name = params.name.unwrap_or_default();
-    log_info(&format!("Client info request for: {}", client_name));
+    log_info(&format!("Client info request for: {client_name}"));
     
     if let Ok(registry) = app_state.game.client_registry().lock() {
         if let Some(client) = registry.get(&client_name) {
@@ -144,7 +144,7 @@ pub async fn handle_client_info(
                 registered_at: format!("{:?}", client.registered_at),
             }))
         } else {
-            Err(ApiError::new(StatusCode::NOT_FOUND, format!("Client '{}' not found", client_name)))
+            Err(ApiError::new(StatusCode::NOT_FOUND, format!("Client '{client_name}' not found")))
         }
     } else {
         Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to access client registry"))
@@ -155,7 +155,7 @@ pub async fn handle_client_info_by_id(
     State(app_state): State<Arc<AppState>>,
     Path(client_id): Path<String>,
 ) -> Result<Json<ClientInfoResponse>, ApiError> {
-    log_info(&format!("Client info by ID request for: {}", client_id));
+    log_info(&format!("Client info by ID request for: {client_id}"));
     
     // Use ClientRegistry method to resolve client name (handles both special board case and regular clients)
     let client_name = if let Ok(registry) = app_state.game.client_registry().lock() {
@@ -191,7 +191,7 @@ pub async fn handle_client_info_by_id(
     }
     
     // Client not found
-    Err(ApiError::new(StatusCode::NOT_FOUND, format!("Client with ID '{}' not found", client_id)))
+    Err(ApiError::new(StatusCode::NOT_FOUND, format!("Client with ID '{client_id}' not found")))
 }
 
 pub async fn handle_generate_cards(
@@ -323,7 +323,7 @@ pub async fn handle_get_assigned_card(
     Path(card_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    log_info(&format!("Get assigned card request for card ID: {}", card_id));
+    log_info(&format!("Get assigned card request for card ID: {card_id}"));
     
     // Get client ID from headers
     let client_id = match headers.get("X-Client-ID") {
@@ -350,7 +350,7 @@ pub async fn handle_get_assigned_card(
     };
 
     if !client_exists {
-        log_error(&format!("Client not registered: {}", client_id));
+        log_error(&format!("Client not registered: {client_id}"));
         return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Client not registered"));
     }
 
@@ -365,13 +365,13 @@ pub async fn handle_get_assigned_card(
     let card_assignment = match card_assignment {
         Some(assignment) => {
             if assignment.client_id != client_id {
-                log_error(&format!("Card {} not assigned to client {}", card_id, client_id));
+                log_error(&format!("Card {card_id} not assigned to client {client_id}"));
                 return Err(ApiError::new(StatusCode::FORBIDDEN, "Card not assigned to this client"));
             }
             assignment
         }
         None => {
-            log_error(&format!("Card not found: {}", card_id));
+            log_error(&format!("Card not found: {card_id}"));
             return Err(ApiError::new(StatusCode::NOT_FOUND, "Card not found"));
         }
     };
@@ -396,7 +396,7 @@ pub async fn handle_board(
     let board_data = if let Ok(board) = app_state.game.board().lock() {
         serde_json::to_value(&*board).unwrap_or_else(|_| serde_json::json!({}))
     } else {
-        serde_json::to_value(&Board::new()).unwrap_or_else(|_| serde_json::json!({}))
+        serde_json::to_value(Board::new()).unwrap_or_else(|_| serde_json::json!({}))
     };
     
     Ok(Json(board_data))
@@ -411,7 +411,7 @@ pub async fn handle_pouch(
     let pouch_data = if let Ok(pouch) = app_state.game.pouch().lock() {
         serde_json::to_value(&*pouch).unwrap_or_else(|_| serde_json::json!({}))
     } else {
-        serde_json::to_value(&Pouch::new()).unwrap_or_else(|_| serde_json::json!({}))
+        serde_json::to_value(Pouch::new()).unwrap_or_else(|_| serde_json::json!({}))
     };
     
     Ok(Json(pouch_data))
@@ -426,7 +426,7 @@ pub async fn handle_scoremap(
     let scorecard_data = if let Ok(scorecard) = app_state.game.scorecard().lock() {
         serde_json::to_value(&*scorecard).unwrap_or_else(|_| serde_json::json!({}))
     } else {
-        serde_json::to_value(&ScoreCard::new()).unwrap_or_else(|_| serde_json::json!({}))
+        serde_json::to_value(ScoreCard::new()).unwrap_or_else(|_| serde_json::json!({}))
     };
     
     Ok(Json(scorecard_data))
@@ -519,10 +519,10 @@ pub async fn handle_extract(
             if app_state.game.is_bingo_reached() {
                 match app_state.game.dump_to_json() {
                     Ok(dump_message) => {
-                        log_info(&format!("Game ended with BINGO! {}", dump_message));
+                        log_info(&format!("Game ended with BINGO! {dump_message}"));
                     }
                     Err(dump_error) => {
-                        log_error(&format!("Failed to dump game state: {}", dump_error));
+                        log_error(&format!("Failed to dump game state: {dump_error}"));
                     }
                 }
             }
@@ -537,7 +537,7 @@ pub async fn handle_extract(
         }
         Err(error_msg) => {
             // Handle extraction errors - match old behavior with proper status codes
-            log_error(&format!("Failed to extract number: {}", error_msg));
+            log_error(&format!("Failed to extract number: {error_msg}"));
             if error_msg.contains("empty") {
                 Err(ApiError::new(StatusCode::CONFLICT, error_msg))
             } else {
@@ -581,10 +581,10 @@ pub async fn handle_newgame(
     if app_state.game.has_game_started() && !app_state.game.is_bingo_reached() {
         match app_state.game.dump_to_json() {
             Ok(dump_message) => {
-                log_info(&format!("Incomplete game dumped before reset: {}", dump_message));
+                log_info(&format!("Incomplete game dumped before reset: {dump_message}"));
             }
             Err(dump_error) => {
-                log_error(&format!("Failed to dump incomplete game state before reset: {}", dump_error));
+                log_error(&format!("Failed to dump incomplete game state before reset: {dump_error}"));
             }
         }
     }
@@ -602,7 +602,7 @@ pub async fn handle_newgame(
             })))
         }
         Err(errors) => {
-            log_error_stderr(&format!("Game reset failed: {:?}", errors));
+            log_error_stderr(&format!("Game reset failed: {errors:?}"));
             Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to reset game: {}", errors.join(", "))))
         }
     }
@@ -640,7 +640,7 @@ pub async fn handle_dumpgame(
     // Dump the game state to JSON
     match app_state.game.dump_to_json() {
         Ok(dump_message) => {
-            log_info(&format!("Game manually dumped: {}", dump_message));
+            log_info(&format!("Game manually dumped: {dump_message}"));
             Ok(Json(json!({
                 "success": true,
                 "message": dump_message,
@@ -651,8 +651,8 @@ pub async fn handle_dumpgame(
             })))
         }
         Err(dump_error) => {
-            log_error(&format!("Manual game dump failed: {}", dump_error));
-            Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to dump game: {}", dump_error)))
+            log_error(&format!("Manual game dump failed: {dump_error}"));
+            Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to dump game: {dump_error}")))
         }
     }
 }

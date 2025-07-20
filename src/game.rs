@@ -63,7 +63,7 @@ impl Game {
         match created_at.duration_since(std::time::UNIX_EPOCH) {
             Ok(duration) => {
                 let datetime: DateTime<Utc> = DateTime::from_timestamp(duration.as_secs() as i64, 0)
-                    .unwrap_or_else(|| Utc::now());
+                    .unwrap_or_else(Utc::now);
                 datetime.format("%Y-%m-%d %H:%M:%S UTC").to_string()
             }
             Err(_) => "Unknown time".to_string(),
@@ -118,7 +118,7 @@ impl Game {
             errors.push("Failed to lock creation time for reset".to_string());
         }
         
-        reset_components.push(format!("New game ID generated: {}", new_id));
+        reset_components.push(format!("New game ID generated: {new_id}"));
 
         // Reset all game structures in coordinated order to prevent deadlocks
         // Follow the mutex acquisition order: pouch -> board -> scorecard -> card_manager -> client_registry
@@ -265,7 +265,7 @@ impl Game {
         // Create the serializable game state
         let game_state = match self.create_serializable_state() {
             Ok(state) => state,
-            Err(e) => return Err(format!("Failed to create serializable state: {}", e)),
+            Err(e) => return Err(format!("Failed to create serializable state: {e}")),
         };
 
         // Create the filename with game ID
@@ -275,20 +275,20 @@ impl Game {
         // Ensure the directory exists
         if let Some(parent) = filepath.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
-                return Err(format!("Failed to create directory {:?}: {}", parent, e));
+                return Err(format!("Failed to create directory {parent:?}: {e}"));
             }
         }
 
         // Serialize the game state to JSON
         let json_content = match serde_json::to_string_pretty(&game_state) {
             Ok(json) => json,
-            Err(e) => return Err(format!("Failed to serialize game state: {}", e)),
+            Err(e) => return Err(format!("Failed to serialize game state: {e}")),
         };
 
         // Write to file
         match fs::write(&filepath, json_content) {
             Ok(_) => Ok(format!("Game dumped to: {}", filepath.display())),
-            Err(e) => Err(format!("Failed to write file {:?}: {}", filepath, e)),
+            Err(e) => Err(format!("Failed to write file {filepath:?}: {e}")),
         }
     }
 

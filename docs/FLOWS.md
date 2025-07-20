@@ -2,13 +2,15 @@
 
 This document describes the interaction flows between the Tombola server and its clients, including sequence diagrams for different usage scenarios.
 
-## Architecture Overview
+### Game State Management
 
-The Tombola game consists of three main components:
+The server uses a unified **Game super struct** that encapsulates all game state:
 
-1. **Tombola Server** (`tombola-server`): Main game server with terminal UI and HTTP API
-2. **Board Client** (`tombola-client`): Terminal client for displaying game state and performing extractions
-3. **Player Client** (`tombola-player`): Interactive client for card management and gameplay
+- **Unique Game IDs**: Each game instance has a randomly generated 8-digit hexadecimal identifier (format: `game_12345678`)
+- **Creation Timestamps**: Games include creation timestamps for tracking and debugging purposes
+- **Thread-Safe Components**: Board, Pouch, ScoreCard, ClientRegistry, and CardAssignmentManager
+- **Coordinated Access**: All components wrapped in `Arc<Mutex<T>>` for thread safety
+- **Enhanced API**: Game ID and creation time included in status and reset responses
 
 ## Client Registration and Game Flow
 
@@ -199,9 +201,10 @@ sequenceDiagram
 ### Authenticated Endpoints (Require X-Client-ID)
 - `POST /extract` - Extract number from pouch (Board Client only)
 - `POST /newgame` - Reset game state (Board Client only)
-- `GET /client/{name}` - Get client info by name
-- `GET /clientbyid/{id}` - Get client info by ID
-- `POST /generatecardsforme` - Generate cards for client
+- `POST /dumpgame` - Dump game state to JSON (Board Client only)
+- `GET /clientinfo` - Get client info by name
+- `GET /clientinfo/{client_id}` - Get client info by ID
+- `POST /generatecards` - Generate cards for client
 - `GET /listassignedcards` - List client's assigned cards
 - `GET /getassignedcard/{card_id}` - Get specific card details
 
@@ -255,21 +258,55 @@ sequenceDiagram
 - Coordinated mutex acquisition order prevents deadlocks
 - Unified Game struct manages all components
 
-## Usage Patterns
+## Game State Persistence
 
-### Automation and Monitoring
-The `--exit` flag enables non-interactive usage patterns:
+The Tombola server includes automatic game state persistence features:
 
-```bash
-# Status monitoring script
-while true; do
-    cargo run --bin tombola-client -- --exit
-    sleep 30
-done
+### Automatic JSON Dumps
+Game state is automatically saved to `data/games/` directory in the following scenarios:
 
-# Player monitoring
-cargo run --bin tombola-player -- --name "Monitor" --exit > game_state.txt
+```mermaid
+sequenceDiagram
+    participant S as Tombola Server
+    participant FS as File System
+    
+    alt BINGO Achieved
+        Note over S: Score reaches 15 (BINGO)
+        S->>FS: Save complete game to {game_id}_{timestamp}.json
+        Note over FS: Game marked as completed
+    end
+    
+    alt New Game Started
+        Note over S: POST /newgame called
+        alt Incomplete game exists
+            S->>FS: Save current game to {game_id}_{timestamp}.json
+            Note over FS: Incomplete game preserved
+        end
+        Note over S: Initialize new game with new ID
+    end
+    
+    alt Manual Dump Requested
+        Note over S: POST /dumpgame called (Board Client only)
+        S->>FS: Save current game to {game_id}_{timestamp}.json
+        Note over FS: Manual snapshot created
+    end
 ```
+
+### File Format
+- **Location**: `data/games/` directory
+- **Naming**: `{game_id}_{timestamp}.json` format
+- **Content**: Complete game state including:
+  - Board state (extracted numbers)
+  - Pouch state (remaining numbers)  
+  - ScoreCard (current scores and achievements)
+  - Client registry (all registered clients)
+  - Card assignments (all assigned cards)
+- **Format**: Pretty-printed JSON for human readability
+
+### Security Considerations
+- Only the Board Client (ID: "0000000000000000") can trigger manual dumps via `/dumpgame`
+- Automatic dumps occur without authentication requirements
+- Game files are stored locally in the server's file system
 
 ### Integration with External Tools
 Non-interactive mode allows integration with:
@@ -277,9 +314,3 @@ Non-interactive mode allows integration with:
 - Automation scripts
 - CI/CD pipelines
 - External notifications systems
-
-### Development and Testing
-The `--newgame` flag combined with `--exit` enables:
-- Automated testing scenarios
-- Development environment setup
-- Game state reset in scripts
