@@ -1,7 +1,7 @@
 # Tombola Game - AI Coding Assistant Instructions
 
 ## Project Information
-- **Version**: 0.8.0
+- **Version**: 0.9.0
 - **Edition**: 2024
 - **Language**: Rust
 - **License**: GPLv3.0
@@ -23,6 +23,7 @@ Recent updates introduce improved modularity with additional components:
 - **`logging.rs`**: Centralized logging utility with timestamp formatting and log levels
 - **`extraction.rs`**: Core extraction logic shared between server and API components
 - **`lib.rs`**: Library structure for shared functionality across binaries
+- **`api_handlers.rs`**: Modular API handler functions separated from server logic (Axum-based)
 
 ### Shared State Management
 The server uses a unified **Game super struct** that encapsulates all game state:
@@ -94,12 +95,14 @@ if let Ok(pouch) = pouch_ref.lock() {
 
 ## Key Development Patterns
 
-### HTTP API Server (`src/server.rs`)
-- Hyper-based async server on `127.0.0.1:3000`
-- All endpoints return JSON with CORS headers
+### HTTP API Server (`src/server.rs` + `src/api_handlers.rs`)
+- Axum-based async server on `127.0.0.1:3000`
+- Modular architecture with separated API handlers in `api_handlers.rs`
+- All endpoints return JSON with CORS headers via `tower-http`
 - Client authentication via `X-Client-ID` header
-- Error responses use standard HTTP status codes
+- Error responses use standard HTTP status codes with custom `ApiError` type
 - Client registration restricted to pre-game state (before any number extraction)
+- `AppState` struct for dependency injection pattern with unified Game state
 
 ### Client Registry (`src/client.rs`)
 - Thread-safe client registration and management
@@ -153,13 +156,22 @@ cargo run --bin tombola-player
 - GET `/board` - Current extracted numbers
 - GET `/pouch` - Available numbers in pouch
 - GET `/scoremap` - Current scores and winners with score map
+- GET `/status` - Server status and game information
+- GET `/runninggameid` - Current game ID and creation timestamp
 
 ### Card Management
 - POST `/generatecards` - Generate new card sets
 - POST `/assigncard` - Assign cards to clients
 - GET `/listassignedcards` - View all assignments
+- GET `/getassignedcard/{card_id}` - Get specific assigned card details
+
+### Client Information
+- POST `/register` - Register new client
+- GET `/clientinfo` - List all registered clients
+- GET `/clientinfo/{client_id}` - Get specific client information
 
 ### Game Management
+- POST `/extract` - Extract next number from pouch
 - POST `/newgame` - Reset game state (auto-dumps current game if started)
 - POST `/dumpgame` - Manually dump current game state to JSON
 
@@ -180,9 +192,9 @@ Current project dependencies (Cargo.toml):
 - `reqwest` - HTTP client with JSON support (for client binaries)
 - `serde` - Serialization framework with derive features
 - `serde_json` - JSON serialization support
-- `hyper` - HTTP server with server and http1 features
-- `hyper-util` - Hyper utilities with tokio features
-- `http-body-util` - HTTP body utilities
+- `axum` - Async web framework for HTTP API server
+- `tower` - Service abstraction layer for Axum
+- `tower-http` - HTTP middleware with CORS support
 - `chrono` - Date and time library for logging timestamps
 - `clap` - Command line argument parsing with derive features
 
@@ -194,10 +206,12 @@ Current project dependencies (Cargo.toml):
 - `src/score.rs`: Scoring logic and prize calculations
 - `src/card.rs`: Card generation and assignment logic
 - `src/client.rs`: Client registration and management
-- `src/server.rs`: HTTP API server implementation
+- `src/server.rs`: HTTP API server implementation (Axum-based)
+- `src/api_handlers.rs`: Separated API handler functions for modular architecture
 - `src/terminal.rs`: Terminal UI rendering
 - `src/pouch.rs`: Number extraction logic
 - `src/config.rs`: Configuration management for server and client settings
 - `src/logging.rs`: Centralized logging utilities
 - `src/extraction.rs`: Shared extraction logic for server and API
 - `src/lib.rs`: Library structure for shared functionality
+- `src/server_old.rs`: Legacy Hyper-based server implementation (deprecated)

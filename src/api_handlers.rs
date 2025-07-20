@@ -12,7 +12,7 @@ use serde_json::json;
 
 use crate::client::{RegisterRequest, RegisterResponse, ClientInfoResponse, ClientInfo};
 use crate::card::{ListAssignedCardsResponse, AssignedCardInfo, GenerateCardsRequest, GenerateCardsResponse};
-use crate::board::Board;
+use crate::board::{Board, BOARD_ID};
 use crate::pouch::Pouch;
 use crate::score::ScoreCard;
 use crate::logging::{log_info, log_error, log_warning, log_error_stderr};
@@ -498,7 +498,7 @@ pub async fn handle_extract(
     };
 
     // Only allow board client (ID: "0000000000000000") to extract numbers
-    if client_id != "0000000000000000" {
+    if client_id != BOARD_ID {
         log_error("Unauthorized: Only board client can extract numbers");
         return Err(ApiError::new(StatusCode::FORBIDDEN, "Unauthorized: Only board client can extract numbers"));
     }
@@ -571,7 +571,7 @@ pub async fn handle_newgame(
     };
 
     // Only allow board client (ID: "0000000000000000") to reset the game
-    if client_id != "0000000000000000" {
+    if client_id != BOARD_ID {
         log_error("Unauthorized: Only board client can reset the game");
         return Err(ApiError::new(StatusCode::FORBIDDEN, "Unauthorized: Only board client can reset the game"));
     }
@@ -632,7 +632,7 @@ pub async fn handle_dumpgame(
     };
 
     // Only allow board client (ID: "0000000000000000") to dump the game
-    if client_id != "0000000000000000" {
+    if client_id != BOARD_ID {
         log_error("Unauthorized: Only board client can dump the game");
         return Err(ApiError::new(StatusCode::FORBIDDEN, "Unauthorized: Only board client can dump the game"));
     }
@@ -816,13 +816,13 @@ mod tests {
 
         let result = handle_client_info_by_id(
             State(app_state.clone()),
-            Path("0000000000000000".to_string()),
+            Path(BOARD_ID.to_string()),
         ).await;
 
         assert!(result.is_ok());
         let response = result.unwrap();
         assert_eq!(response.name, "Board");
-        assert_eq!(response.client_id, "0000000000000000");
+        assert_eq!(response.client_id, BOARD_ID);
         assert_eq!(response.client_type, "board");
     }
 
@@ -1022,7 +1022,7 @@ mod tests {
         
         // Extract some numbers using the proper API handler
         let mut headers = HeaderMap::new();
-        headers.insert("X-Client-ID", "0000000000000000".parse().unwrap()); // Board client
+        headers.insert("X-Client-ID", BOARD_ID.parse().unwrap()); // Board client
         
         let _ = handle_extract(
             State(app_state.clone()),
@@ -1132,7 +1132,7 @@ mod tests {
     async fn test_handle_extract_success() {
         let app_state = create_test_app_state();
         let mut headers = HeaderMap::new();
-        headers.insert("X-Client-ID", "0000000000000000".parse().unwrap()); // Board client
+        headers.insert("X-Client-ID", BOARD_ID.parse().unwrap()); // Board client
 
         let result = handle_extract(
             State(app_state.clone()),
@@ -1189,7 +1189,7 @@ mod tests {
     async fn test_handle_newgame_success() {
         let app_state = create_test_app_state();
         let mut headers = HeaderMap::new();
-        headers.insert("X-Client-ID", "0000000000000000".parse().unwrap()); // Board client
+        headers.insert("X-Client-ID", BOARD_ID.parse().unwrap()); // Board client
 
         // Register a client and extract some numbers to have game state
         let _ = register_test_client(&app_state, "newgame_test_player").await;
@@ -1226,7 +1226,7 @@ mod tests {
     async fn test_handle_dumpgame_success() {
         let app_state = create_test_app_state();
         let mut headers = HeaderMap::new();
-        headers.insert("X-Client-ID", "0000000000000000".parse().unwrap()); // Board client
+        headers.insert("X-Client-ID", BOARD_ID.parse().unwrap()); // Board client
 
         // Create some game state
         let _ = register_test_client(&app_state, "dumpgame_test_player").await;
@@ -1312,7 +1312,7 @@ mod tests {
         
         // Extract a number (as board client)
         let mut board_headers = HeaderMap::new();
-        board_headers.insert("X-Client-ID", "0000000000000000".parse().unwrap());
+        board_headers.insert("X-Client-ID", BOARD_ID.parse().unwrap());
         
         let extract_result = handle_extract(
             State(app_state.clone()),

@@ -13,7 +13,7 @@
 use std::error::Error;
 use clap::Parser;
 use tombola::defs::Number;
-use tombola::board::Board;
+use tombola::board::{Board, BOARD_ID};
 use tombola::terminal;
 use tombola::config::ClientConfig;
 
@@ -34,8 +34,6 @@ struct Args {
 // Function to extract numbers from the highest achievement for highlighting
 // Only emphasizes board client's achievements, and only if no other client has achieved higher
 fn extract_highest_achievement_numbers(scorecard: &tombola::score::ScoreCard) -> Vec<Number> {
-    const BOARD_CLIENT_ID: &str = "0000000000000000";
-    
     if scorecard.published_score < 2 {
         return Vec::new();
     }
@@ -48,7 +46,7 @@ fn extract_highest_achievement_numbers(scorecard: &tombola::score::ScoreCard) ->
     // Find the board client's highest achievement
     for (score_level, achievements) in score_map.iter() {
         for achievement in achievements {
-            if achievement.card_id == BOARD_CLIENT_ID && *score_level > board_client_highest_score {
+            if achievement.card_id == BOARD_ID && *score_level > board_client_highest_score {
                 board_client_highest_score = *score_level;
                 board_client_numbers = achievement.numbers.clone();
             }
@@ -207,7 +205,7 @@ async fn extract_number(server_base_url: &str) -> Result<u8, Box<dyn Error>> {
     
     let response = client
         .post(&url)
-        .header("X-Client-ID", "0000000000000000") // Board client ID
+        .header("X-Client-ID", BOARD_ID) // Board client ID
         .send()
         .await?;
     
@@ -258,7 +256,7 @@ async fn get_game_id(server_base_url: &str) -> Result<String, Box<dyn Error>> {
 
 async fn get_client_name_by_id(server_base_url: &str, client_id: &str) -> Result<String, Box<dyn Error>> {
     // Handle special board client ID
-    if client_id == "0000000000000000" {
+    if client_id == BOARD_ID {
         return Ok("Board".to_string());
     }
     
@@ -356,7 +354,7 @@ async fn call_newgame(server_base_url: &str) -> Result<(), Box<dyn Error>> {
     
     let response = client
         .post(&url)
-        .header("X-Client-ID", "0000000000000000") // Board client ID
+        .header("X-Client-ID", BOARD_ID) // Board client ID
         .header("Content-Type", "application/json")
         .send()
         .await?;

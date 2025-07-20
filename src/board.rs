@@ -6,6 +6,27 @@ use crate::score::ScoreCard;
 use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
+// Board client ID constant used throughout the application
+pub const BOARD_ID: &str = "0000000000000000";
+
+/// Returns the board's client ID as a String
+#[inline]
+pub fn board_client_id() -> String {
+    BOARD_ID.to_string()
+}
+
+/// Returns the board's card ID as a String  
+#[inline]
+pub fn board_card_id() -> String {
+    BOARD_ID.to_string()
+}
+
+/// Returns the board ID as a String (generic helper for any string conversion)
+#[inline]
+pub fn board_id_string() -> String {
+    BOARD_ID.to_string()
+}
+
 // This struct represents the board in the Tombola game.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Board {

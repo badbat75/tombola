@@ -11,7 +11,7 @@ use http_body_util::{Full, BodyExt};
 use serde_json::json;
 
 // Import Board from board module
-use crate::board::Board;
+use crate::board::{Board, BOARD_ID};
 use crate::pouch::Pouch;
 use crate::score::ScoreCard;
 use crate::client::{RegisterRequest, RegisterResponse, ClientInfoResponse, ClientInfo};
@@ -841,7 +841,7 @@ async fn handle_extract(
     };
 
     // Only allow board client (ID: "0000000000000000") to extract numbers
-    if client_id != "0000000000000000" {
+    if client_id != BOARD_ID {
         let error_response = ErrorResponse {
             error: "Unauthorized: Only board client can extract numbers".to_string(),
         };
@@ -965,7 +965,7 @@ async fn handle_newgame(
     };
 
     // Only allow board client (ID: "0000000000000000") to reset the game
-    if client_id != "0000000000000000" {
+    if client_id != BOARD_ID {
         let error_response = ErrorResponse {
             error: "Unauthorized: Only board client can reset the game".to_string(),
         };
@@ -1065,7 +1065,7 @@ async fn handle_dumpgame(
     };
 
     // Only allow board client (ID: "0000000000000000") to dump the game
-    if client_id != "0000000000000000" {
+    if client_id != BOARD_ID {
         let error_response = ErrorResponse {
             error: "Unauthorized: Only board client can dump the game".to_string(),
         };

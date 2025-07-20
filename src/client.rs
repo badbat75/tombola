@@ -3,6 +3,21 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
 use serde::{Deserialize, Serialize};
 
+// Board client ID constant used throughout the application for client operations
+pub const BOARDCLIENT_ID: &str = "0000000000000000";
+
+/// Returns the board client's client ID as a String
+#[inline]
+pub fn boardclient_id() -> String {
+    BOARDCLIENT_ID.to_string()
+}
+
+/// Returns the board client ID as a String (generic helper for any string conversion)
+#[inline]
+pub fn boardclient_id_string() -> String {
+    BOARDCLIENT_ID.to_string()
+}
+
 // Client registration structures
 #[derive(Debug, Deserialize, Clone)]
 pub struct RegisterRequest {
@@ -108,7 +123,7 @@ impl ClientRegistry {
 
     // Helper function to get client name by client ID
     pub fn get_client_name_by_id(&self, client_id: &str) -> Option<String> {
-        if client_id == "0000000000000000" {
+        if client_id == BOARDCLIENT_ID {
             return Some("Board".to_string());
         }
         

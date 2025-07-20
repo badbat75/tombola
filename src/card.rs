@@ -1,5 +1,6 @@
 use crate::defs::{Number, FIRSTNUMBER, LASTNUMBER, CARDSNUMBER, BOARDCONFIG};
 use crate::client::ClientRegistry;
+use crate::board::{BOARD_ID, board_client_id};
 
 use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
@@ -571,7 +572,7 @@ impl CardAssignmentManager {
 
     // Helper function to get client name from card ID
     pub fn get_client_name_for_card(&self, card_id: &str, client_registry: &ClientRegistry) -> String {
-        if card_id == "0000000000000000" {
+        if card_id == BOARD_ID {
             return "Board".to_string();
         }
         
@@ -587,8 +588,8 @@ impl CardAssignmentManager {
 
     // Helper function to get client ID from card ID
     pub fn get_client_id_for_card(&self, card_id: &str) -> String {
-        if card_id == "0000000000000000" {
-            return "0000000000000000".to_string(); // Special ID for board
+        if card_id == BOARD_ID {
+            return board_client_id(); // Special ID for board
         }
         
         if let Some(assignment) = self.get_card_assignment(card_id) {

@@ -2,7 +2,7 @@
 // This module handles the scorecard logic and prize checking for the Tombola game.
 
 use crate::defs::{BOARDCONFIG, NUMBERSPERCARD, Number};
-use crate::board::Board;
+use crate::board::{Board, board_client_id, board_card_id};
 use crate::card::CardAssignmentManager;
 use serde::{Deserialize, Serialize};
 
@@ -341,8 +341,8 @@ impl ScoreCard {
                     } else if boardscore_value == NUMBERSPERCARD {
                         // Board achieved BINGO
                         vec![ScoreAchievement {
-                            client_id: "0000000000000000".to_string(),
-                            card_id: "0000000000000000".to_string(),
+                            client_id: board_client_id(),
+                            card_id: board_card_id(),
                             numbers: board_numbers_contributing.to_vec(),
                         }]
                     } else {
@@ -376,8 +376,8 @@ impl ScoreCard {
                                     // If board score also meets this level, include it
                                     if boardscore_value == achievement_level {
                                         achievements.push(ScoreAchievement {
-                                            client_id: "0000000000000000".to_string(),
-                                            card_id: "0000000000000000".to_string(),
+                                            client_id: board_client_id(),
+                                            card_id: board_card_id(),
                                             numbers: board_numbers_contributing.to_vec(),
                                         });
                                     }
@@ -385,8 +385,8 @@ impl ScoreCard {
                                 } else if boardscore_value == achievement_level {
                                     // Only board achievement
                                     vec![ScoreAchievement {
-                                        client_id: "0000000000000000".to_string(),
-                                        card_id: "0000000000000000".to_string(),
+                                        client_id: board_client_id(),
+                                        card_id: board_card_id(),
                                         numbers: board_numbers_contributing.to_vec(),
                                     }]
                                 } else {
@@ -421,8 +421,8 @@ impl ScoreCard {
                                         .copied()
                                         .collect();
                                     level_achievements.push(ScoreAchievement {
-                                        client_id: "0000000000000000".to_string(),
-                                        card_id: "0000000000000000".to_string(),
+                                        client_id: board_client_id(),
+                                        card_id: board_card_id(),
                                         numbers: level_numbers,
                                     });
                                 }
