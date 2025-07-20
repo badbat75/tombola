@@ -76,19 +76,22 @@ pub async fn handle_register(
 ) -> Result<Json<RegisterResponse>, ApiError> {
     log_info(&format!("Client registration request: {request:?}"));
     
+    let client_name = &request.name;
+    let client_type = &request.client_type;
+    
     // Create client info first
     let client_info = ClientInfo::new(
-        request.name.clone(),
-        request.client_type.clone(),
+        client_name,
+        client_type,
     );
     let client_id = client_info.id.clone();
 
     // Check if client already exists and return existing info
     if let Ok(mut registry) = app_state.game.client_registry().lock() {
-        if let Some(existing_client) = registry.get(&request.name) {
+        if let Some(existing_client) = registry.get(client_name) {
             return Ok(Json(RegisterResponse {
                 client_id: existing_client.id.clone(),
-                message: format!("Client '{}' already registered", request.name),
+                message: format!("Client '{client_name}' already registered"),
             }));
         }
 
@@ -96,7 +99,7 @@ pub async fn handle_register(
         let numbers_extracted = app_state.game.has_game_started();
 
         // Try to register the new client (will fail if numbers have been extracted)
-        match registry.insert(request.name.clone(), client_info, numbers_extracted) {
+        match registry.insert(client_name.to_string(), client_info, numbers_extracted) {
             Ok(_) => {
                 log_info(&format!("Client registered successfully: {client_id}"));
             }
@@ -112,19 +115,17 @@ pub async fn handle_register(
 
     // Check if client requested cards during registration, default to 1 if not specified
     let card_count = request.nocard.unwrap_or(1);
-    log_info(&format!("Generating {} cards for client '{}' during registration", card_count, request.name));
-    
-    // Generate the requested number of cards using the card manager
+            log_info(&format!("Generating {card_count} cards for client '{client_name}' during registration"));    // Generate the requested number of cards using the card manager
     if let Ok(mut manager) = app_state.game.card_manager().lock() {
-        manager.assign_cards(client_id.clone(), card_count);
-        log_info(&format!("Generated and assigned {} cards to client '{}'", card_count, request.name));
+        manager.assign_cards(&client_id, card_count);
+        log_info(&format!("Generated and assigned {card_count} cards to client '{client_name}'"));
     } else {
-        log_warning(&format!("Failed to acquire card manager lock for client '{}'", request.name));
+        log_warning(&format!("Failed to acquire card manager lock for client '{client_name}'"));
     }
 
     Ok(Json(RegisterResponse {
         client_id,
-        message: format!("Client '{}' registered successfully", request.name),
+        message: format!("Client '{client_name}' registered successfully"),
     }))
 }
 
@@ -242,7 +243,7 @@ pub async fn handle_generate_cards(
 
     // Generate cards using the CardAssignmentManager
     let card_infos = if let Ok(mut manager) = app_state.game.card_manager().lock() {
-        let (cards, _) = manager.assign_cards(client_id.clone(), request.count);
+        let (cards, _) = manager.assign_cards(&client_id, request.count);
         cards
     } else {
         log_error("Failed to acquire card manager lock");
@@ -306,8 +307,8 @@ pub async fn handle_list_assigned_cards(
     // Create response
     let card_infos: Vec<AssignedCardInfo> = assigned_cards.iter().map(|card_id| {
         AssignedCardInfo {
-            card_id: card_id.clone(),
-            assigned_to: client_id.clone(),
+            card_id: card_id.clone(), // Clone needed for owned response
+            assigned_to: client_id.clone(), // Clone needed since used multiple times
         }
     }).collect();
 

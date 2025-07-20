@@ -44,8 +44,8 @@ impl ClientConfig {
         let config_map = parse_config(&content)?;
         
         let host = config_map.get("host")
-            .unwrap_or(&"127.0.0.1".to_string())
-            .clone();
+            .cloned()
+            .unwrap_or_else(|| "127.0.0.1".to_string());
         
         let port = config_map.get("port")
             .and_then(|p| p.parse::<u16>().ok())
@@ -60,8 +60,8 @@ impl ClientConfig {
             .unwrap_or(3);
         
         let client_name = config_map.get("client_name")
-            .unwrap_or(&"DefaultClient".to_string())
-            .clone();
+            .cloned()
+            .unwrap_or_else(|| "DefaultClient".to_string());
         
         Ok(ClientConfig { host, port, timeout, retry_attempts, client_name })
     }
@@ -92,8 +92,8 @@ impl ServerConfig {
         let config_map = parse_config(&content)?;
         
         let host = config_map.get("host")
-            .unwrap_or(&"127.0.0.1".to_string())
-            .clone();
+            .cloned()
+            .unwrap_or_else(|| "127.0.0.1".to_string());
         
         let port = config_map.get("port")
             .and_then(|p| p.parse::<u16>().ok())

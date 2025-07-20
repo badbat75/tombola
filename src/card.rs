@@ -466,7 +466,7 @@ impl CardManagement {
     }
     
     /// Generate cards and handle complete assignment process
-    pub fn generate_and_assign_cards(&self, count: u32, client_id: String) -> (Vec<CardInfo>, Vec<String>, Vec<CardAssignment>) {
+    pub fn generate_and_assign_cards(&self, count: u32, client_id: &str) -> (Vec<CardInfo>, Vec<String>, Vec<CardAssignment>) {
         let cards_with_ids = self.generate_cards(count as usize);
         let mut card_infos = Vec::new();
         let mut client_card_ids = Vec::new();
@@ -475,7 +475,7 @@ impl CardManagement {
         for card_with_id in cards_with_ids {
             let card_id_str = format!("{:016X}", card_with_id.id);
             
-            // Add to client's card list
+            // Add to client's card list (clone needed for multiple uses)
             client_card_ids.push(card_id_str.clone());
             
             // Convert Card to CardInfo for response
@@ -490,7 +490,7 @@ impl CardManagement {
             // Create assignment (takes ownership of remaining values)
             let assignment = CardAssignment {
                 card_id: card_id_str,
-                client_id: client_id.clone(),
+                client_id: client_id.to_string(),
                 card_data: card_with_id.card,
             };
             assignments.push(assignment);
@@ -521,9 +521,9 @@ impl CardAssignmentManager {
         }
     }
 
-    pub fn assign_cards(&mut self, client_id: String, count: u32) -> (Vec<CardInfo>, Vec<String>) {
+    pub fn assign_cards(&mut self, client_id: &str, count: u32) -> (Vec<CardInfo>, Vec<String>) {
         let card_management = CardManagement::new();
-        let (card_infos, client_card_ids, assignments) = card_management.generate_and_assign_cards(count, client_id.clone());
+        let (card_infos, client_card_ids, assignments) = card_management.generate_and_assign_cards(count, client_id);
         
         // Store assignments
         for assignment in assignments {
@@ -531,8 +531,8 @@ impl CardAssignmentManager {
             self.assignments.insert(card_id, assignment);
         }
         
-        // Store client's card IDs
-        self.client_cards.insert(client_id, client_card_ids.clone());
+        // Store client's card IDs (clone needed since we return it too)
+        self.client_cards.insert(client_id.to_string(), client_card_ids.clone());
         
         (card_infos, client_card_ids)
     }

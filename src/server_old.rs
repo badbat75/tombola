@@ -191,8 +191,8 @@ async fn handle_register(
 
     // Create client info first
     let client_info = ClientInfo::new(
-        register_request.name.clone(),
-        register_request.client_type.clone(),
+        &register_request.name,
+        &register_request.client_type,
     );
     let client_id = client_info.id.clone();
 

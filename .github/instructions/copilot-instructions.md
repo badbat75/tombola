@@ -1,10 +1,21 @@
 # Tombola Game - AI Coding Assistant Instructions
 
-## Project Information
-- **Version**: 0.9.0
-- **Edition**: 2024
-- **Language**: Rust
-- **License**: GPLv3.0
+- This is a Rust-based multi-binary tombola/bingo game with a client-server architecture. The main components include a server for managing the game state and two clients for interacting with the game. 
+
+## Behaviour Guidelines
+- Do not build everytime unless you need to test changes in the code running the binaries.
+- This is a Windows system with PowerShell, do not use bash commands.
+- Under doc you will find `TOMBOLA_API.md` that contains the API documentation for the game server, keep it aligned for future API changes.
+- Under doc you will find `FLOWS.md` that contains the data flows for the main logics.
+- Always update `README.md` and `docs` when you make changes to the API or game logic.
+- If you need to create test scripts, place them in the `tests/` directory.
+- Run `cargo clippy` when you achieve the objective to lint the code. Apply suggestions to code with `cargo clippy --fix`. Allow --dirty-code if needed.
+- Be concise and clear in your responses.
+- For print statements, use this format: `println!("Hello, {NAME}. Nice to meet you!");`.
+- Prefer references over clones or copies unless necessary.
+- Use Context7 for language references, libraries, and tools and examples.
+- Unless you want to test the business logic do not build the binaries every time, just run `cargo check`.
+- Use consistent types for variables, functions, and structs.
 
 ## Architecture Overview
 
@@ -214,4 +225,4 @@ Current project dependencies (Cargo.toml):
 - `src/logging.rs`: Centralized logging utilities
 - `src/extraction.rs`: Shared extraction logic for server and API
 - `src/lib.rs`: Library structure for shared functionality
-- `src/server_old.rs`: Legacy Hyper-based server implementation (deprecated)
+- `src/server_old.rs`: Legacy Hyper-based server implementation (deprecated/do not use it to get information and do not change it)

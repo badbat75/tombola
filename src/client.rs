@@ -68,7 +68,9 @@ impl ClientInfo {
     }
 
     // Create a new ClientInfo with generated ID
-    pub fn new(name: String, client_type: String) -> Self {
+    pub fn new(name: impl Into<String>, client_type: impl Into<String>) -> Self {
+        let name = name.into();
+        let client_type = client_type.into();
         let id = Self::generate_client_id(&name, &client_type);
         ClientInfo {
             id,
