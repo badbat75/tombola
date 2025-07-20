@@ -28,11 +28,11 @@ pub struct AppState {
 pub fn start_server(config: ServerConfig) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>) {
     let shutdown_signal = Arc::new(AtomicBool::new(false));
     let _shutdown_clone = Arc::clone(&shutdown_signal);
-    
+
     // Create the unified Game state container
     let game = Game::new();
     log_info(&format!("Created new game instance: {}", game.game_info()));
-    
+
     let handle = tokio::spawn(async move {
         let app_state = Arc::new(AppState {
             game,
@@ -67,12 +67,12 @@ pub fn start_server(config: ServerConfig) -> (tokio::task::JoinHandle<()>, Arc<A
         };
 
         log_info(&format!("Server starting on {addr}"));
-        
+
         // Use axum::serve to handle the server
         if let Err(err) = axum::serve(listener, app).await {
             log_error(&format!("Server error: {err:?}"));
         }
-        
+
         log_info("Server shutdown complete");
     });
 

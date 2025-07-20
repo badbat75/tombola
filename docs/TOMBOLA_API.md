@@ -313,7 +313,7 @@ Get the current scorecard and score map (prize tracking information).
     "3": [
       {
         "client_id": "A1B2C3D4E5F6G7H8",
-        "card_id": "card_abc123", 
+        "card_id": "card_abc123",
         "numbers": [15, 23, 37]
       },
       {
@@ -580,7 +580,7 @@ Tombola cards follow specific rules:
 
 1. **Grid Structure**: 3 rows × 9 columns
 2. **Number Distribution**: Each card contains exactly 15 numbers and 12 empty cells
-3. **Column Ranges**: 
+3. **Column Ranges**:
    - Column 1: 1-9
    - Column 2: 10-19
    - Column 3: 20-29
@@ -660,7 +660,7 @@ Currently, no rate limiting is implemented. The server uses a connection timeout
 
 The server supports concurrent connections and uses Arc<Mutex<>> for thread-safe access to shared state:
 - Board state
-- Pouch state  
+- Pouch state
 - Client registry
 - Card assignments
 

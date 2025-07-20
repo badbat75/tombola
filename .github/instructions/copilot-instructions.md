@@ -1,6 +1,6 @@
 # Tombola Game - AI Coding Assistant Instructions
 
-- This is a Rust-based multi-binary tombola/bingo game with a client-server architecture. The main components include a server for managing the game state and two clients for interacting with the game. 
+- This is a Rust-based multi-binary tombola/bingo game with a client-server architecture. The main components include a server for managing the game state and two clients for interacting with the game.
 
 ## Behaviour Guidelines
 - Do not build everytime unless you need to test changes in the code running the binaries.

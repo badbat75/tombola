@@ -10,7 +10,7 @@ use tombola::logging::{log_info, log_error};
 async fn main() {
     // Load server configuration
     let config = ServerConfig::load_or_default();
-    
+
     // Start the API server with all components created internally
     let (server_handle, _shutdown_signal) = server::start_server(config.clone());
 

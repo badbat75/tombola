@@ -27,12 +27,12 @@ pub fn perform_extraction(
         }
         pouch.extract()
     };
-    
+
     // Check if extraction was successful (pouch not empty)
     if extracted == 0 {
         return Err("No numbers remaining in pouch".to_string());
     }
-    
+
     // Perform all board operations in a coordinated manner
     // Keep board and scorecard locks open for the entire operation
     if let Ok(mut board) = board_ref.lock() {

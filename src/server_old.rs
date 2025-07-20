@@ -30,11 +30,11 @@ struct ErrorResponse {
 pub fn start_server(config: ServerConfig) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>) {
     let shutdown_signal = Arc::new(AtomicBool::new(false));
     let shutdown_clone = Arc::clone(&shutdown_signal);
-    
+
     // Create the unified Game state container
     let game = Game::new();
     log_info(&format!("Created new game instance: {}", game.game_info()));
-    
+
     let handle = tokio::spawn(async move {
         let addr = SocketAddr::from((config.host.parse::<std::net::IpAddr>().unwrap_or([127, 0, 0, 1].into()), config.port));
         let listener = match TcpListener::bind(&addr).await {
@@ -61,13 +61,13 @@ pub fn start_server(config: ServerConfig) -> (tokio::task::JoinHandle<()>, Arc<A
                 Ok(Ok((stream, _))) => {
                     let game_clone = game.clone();
                     let io = TokioIo::new(stream);
-                    
+
                     // Spawn a task to handle the connection
                     tokio::spawn(async move {
                         let service = service_fn(move |req| {
                             handle_request(req, game_clone.clone())
                         });
-                        
+
                         if let Err(err) = http1::Builder::new()
                             .serve_connection(io, service)
                             .await
@@ -238,7 +238,7 @@ async fn handle_register(
     // Check if client requested cards during registration, default to 1 if not specified
     let card_count = register_request.nocard.unwrap_or(1);
     log_info(&format!("Generating {} cards for client '{}' during registration", card_count, register_request.name));
-    
+
     // Generate the requested number of cards using the card manager
     if let Ok(mut manager) = game.card_manager().lock() {
         manager.assign_cards(client_id.clone(), card_count);
@@ -276,7 +276,7 @@ async fn handle_client_info(
                 client_type: client_info.client_type.clone(),
                 registered_at: format!("{:?}", client_info.registered_at),
             };
-            
+
             let body = serde_json::to_string(&client_response).unwrap_or_else(|_| "{}".to_string());
             return Response::builder()
                 .status(StatusCode::OK)
@@ -286,7 +286,7 @@ async fn handle_client_info(
                 .unwrap();
         }
     }
-    
+
     // Client not found
     let error_response = ErrorResponse {
         error: format!("Client '{client_name}' not found"),
@@ -320,7 +320,7 @@ async fn handle_client_info_by_id(
             client_type: "board".to_string(),
             registered_at: "System".to_string(),
         };
-        
+
         let body = serde_json::to_string(&client_response).unwrap_or_else(|_| "{}".to_string());
         return Response::builder()
             .status(StatusCode::OK)
@@ -341,7 +341,7 @@ async fn handle_client_info_by_id(
                         client_type: client_info.client_type.clone(),
                         registered_at: format!("{:?}", client_info.registered_at),
                     };
-                    
+
                     let body = serde_json::to_string(&client_response).unwrap_or_else(|_| "{}".to_string());
                     return Response::builder()
                         .status(StatusCode::OK)
@@ -353,7 +353,7 @@ async fn handle_client_info_by_id(
             }
         }
     }
-    
+
     // Client not found
     let error_response = ErrorResponse {
         error: format!("Client with ID '{client_id}' not found"),
@@ -718,7 +718,7 @@ async fn handle_board(game: &Game) -> Response<Full<Bytes>> {
     } else {
         serde_json::to_string(&Board::new()).unwrap_or_else(|_| "{}".to_string())
     };
-    
+
     Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/json")
@@ -734,7 +734,7 @@ async fn handle_pouch(game: &Game) -> Response<Full<Bytes>> {
     } else {
         serde_json::to_string(&Pouch::new()).unwrap_or_else(|_| "{}".to_string())
     };
-    
+
     Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/json")
@@ -750,7 +750,7 @@ async fn handle_scoremap(game: &Game) -> Response<Full<Bytes>> {
     } else {
         serde_json::to_string(&ScoreCard::new()).unwrap_or_else(|_| "{}".to_string())
     };
-    
+
     Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/json")
@@ -874,7 +874,7 @@ async fn handle_extract(
             // Get current pouch and board state for response using Game methods
             let numbers_remaining = game.pouch_length();
             let total_extracted = game.board_length();
-            
+
             // Check if BINGO was reached after this extraction and dump game state if so
             if game.is_bingo_reached() {
                 match game.dump_to_json() {
@@ -886,7 +886,7 @@ async fn handle_extract(
                     }
                 }
             }
-            
+
             // Create success response
             let response = json!({
                 "success": true,
@@ -895,7 +895,7 @@ async fn handle_extract(
                 "total_extracted": total_extracted,
                 "message": format!("Number {} extracted successfully", extracted_number)
             });
-            
+
             let body = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
             Response::builder()
                 .status(StatusCode::OK)
@@ -911,7 +911,7 @@ async fn handle_extract(
             } else {
                 StatusCode::INTERNAL_SERVER_ERROR
             };
-            
+
             let error_response = ErrorResponse {
                 error: error_msg,
             };

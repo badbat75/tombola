@@ -15,7 +15,7 @@ impl LogLevel {
     fn as_str(&self) -> &'static str {
         match self {
             LogLevel::Info => "INFO",
-            LogLevel::Error => "ERROR", 
+            LogLevel::Error => "ERROR",
             LogLevel::Warning => "WARNING",
         }
     }
@@ -32,7 +32,7 @@ pub fn log_info(message: &str) {
     log_message(LogLevel::Info, message);
 }
 
-/// Log an error message  
+/// Log an error message
 pub fn log_error(message: &str) {
     log_message(LogLevel::Error, message);
 }

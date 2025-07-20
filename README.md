@@ -7,7 +7,7 @@ A Rust-based multi-binary tombola (bingo) game with a client-server architecture
 This project consists of three main binaries:
 
 - **`tombola-server`**: Main game server with terminal UI and HTTP API
-- **`tombola-client`**: Terminal client that displays current game state  
+- **`tombola-client`**: Terminal client that displays current game state
 - **`tombola-player`**: Interactive client for card management and gameplay
 
 ## Features
@@ -60,7 +60,7 @@ cargo run --bin tombola-client -- --newgame
 # Run display-only client in non-interactive mode (exit after display)
 cargo run --bin tombola-client -- --exit
 
-# Run interactive card client  
+# Run interactive card client
 cargo run --bin tombola-player
 
 # Run interactive card client with specific settings

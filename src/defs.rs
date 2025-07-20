@@ -39,23 +39,23 @@ impl Colors {
     pub fn green() -> &'static str {
         "\x1b[1;32m" // Bold Green - for current/last number
     }
-    
+
     pub fn yellow() -> &'static str {
         "\x1b[1;33m" // Bold Yellow - for marked numbers and prizes
     }
-    
+
     pub fn reset() -> &'static str {
         "\x1b[0m" // Reset - to reset formatting
     }
-    
+
     pub fn red() -> &'static str {
         "\x1b[1;31m" // Bold Red - for errors or warnings
     }
-    
+
     pub fn blue() -> &'static str {
         "\x1b[1;34m" // Bold Blue - for information
     }
-    
+
     pub fn magenta() -> &'static str {
         "\x1b[1;35m" // Bold Magenta - for special highlights
     }

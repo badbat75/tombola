@@ -35,7 +35,7 @@ impl Game {
         // Generate a random game ID
         let mut rng = rand::rng();
         let game_id = format!("game_{:08x}", rng.random::<u32>());
-        
+
         Self {
             id: Arc::new(Mutex::new(game_id)),
             created_at: Arc::new(Mutex::new(SystemTime::now())),
@@ -104,20 +104,20 @@ impl Game {
         // Generate new game ID and creation time for the fresh game
         let mut rng = rand::rng();
         let new_id = format!("game_{:08x}", rng.random::<u32>());
-        
+
         // Update game ID and creation time
         if let Ok(mut id_lock) = self.id.lock() {
             *id_lock = new_id.clone();
         } else {
             errors.push("Failed to lock game ID for reset".to_string());
         }
-        
+
         if let Ok(mut created_at_lock) = self.created_at.lock() {
             *created_at_lock = SystemTime::now();
         } else {
             errors.push("Failed to lock creation time for reset".to_string());
         }
-        
+
         reset_components.push(format!("New game ID generated: {new_id}"));
 
         // Reset all game structures in coordinated order to prevent deadlocks
@@ -372,7 +372,7 @@ mod tests {
     #[test]
     fn test_game_creation() {
         let game = Game::new();
-        
+
         // Verify all components are properly initialized
         assert_eq!(game.board_length(), 0);
         assert_eq!(game.published_score(), 0);
@@ -380,18 +380,18 @@ mod tests {
         assert!(!game.has_game_started());
         assert!(!game.is_bingo_reached());
         assert!(!game.is_pouch_empty());
-        
+
         // Verify new fields are set
         assert!(!game.id().is_empty());
         assert!(game.id().starts_with("game_"));
         assert_eq!(game.id().len(), 13); // "game_" + 8 hex chars
-        
+
         // Verify creation time is recent (within last second)
         let now = SystemTime::now();
         let creation_time = game.created_at();
         let time_diff = now.duration_since(creation_time).unwrap_or_default();
         assert!(time_diff.as_secs() < 2); // Should be created within last 2 seconds
-        
+
         // Verify the human-readable time string format
         let time_string = game.created_at_string();
         assert!(time_string.contains("UTC"));
@@ -402,18 +402,18 @@ mod tests {
     fn test_game_reset() {
         let game = Game::new();
         let original_id = game.id();
-        
+
         // Test that reset works properly and generates new game ID
         let result = game.reset_game();
         assert!(result.is_ok());
-        
+
         let reset_components = result.unwrap();
         assert!(reset_components.contains(&"Pouch refilled with numbers 1-90".to_string()));
         assert!(reset_components.contains(&"Board state cleared".to_string()));
         assert!(reset_components.contains(&"Score card reset".to_string()));
         assert!(reset_components.contains(&"Card assignments cleared".to_string()));
         assert!(reset_components.contains(&"Client registry cleared".to_string()));
-        
+
         // Verify that a new game ID was generated
         assert_ne!(game.id(), original_id);
         assert!(game.id().starts_with("game_"));
@@ -423,7 +423,7 @@ mod tests {
     #[test]
     fn test_game_state_queries() {
         let game = Game::new();
-        
+
         // Test initial state
         assert_eq!(game.board_length(), 0);
         assert_eq!(game.published_score(), 0);
@@ -435,10 +435,10 @@ mod tests {
     fn test_unique_game_ids() {
         let game1 = Game::new();
         let game2 = Game::new();
-        
+
         // Verify each game gets a unique ID
         assert_ne!(game1.id(), game2.id());
-        
+
         // Verify both IDs follow the expected format
         assert!(game1.id().starts_with("game_"));
         assert!(game2.id().starts_with("game_"));
@@ -450,7 +450,7 @@ mod tests {
     fn test_game_info() {
         let game = Game::new();
         let info = game.game_info();
-        
+
         // Verify the info string contains expected components
         assert!(info.contains("Game[id="));
         assert!(info.contains("created="));
@@ -464,11 +464,11 @@ mod tests {
     #[test]
     fn test_game_state_serialization() {
         let game = Game::new();
-        
+
         // Test creating serializable state
         let serializable_state = game.create_serializable_state();
         assert!(serializable_state.is_ok());
-        
+
         let state = serializable_state.unwrap();
         assert_eq!(state.id, game.id());
         assert_eq!(state.board.len(), 0);
@@ -478,12 +478,12 @@ mod tests {
     #[test]
     fn test_game_ending_conditions() {
         let game = Game::new();
-        
+
         // Initially, game hasn't ended
         assert!(!game.is_game_ended());
         assert!(!game.is_bingo_reached());
         assert!(!game.is_pouch_empty());
-        
+
         // Test dump_if_ended for a non-ended game
         let dump_result = game.dump_if_ended();
         assert!(dump_result.is_err());
@@ -493,21 +493,21 @@ mod tests {
     #[test]
     fn test_selective_dump_logic() {
         let game = Game::new();
-        
+
         // Test scenarios for selective dumping on newgame:
-        
+
         // Scenario 1: Game not started - should not dump
         assert!(!game.has_game_started());
         assert!(!game.is_bingo_reached());
         // Logic: !game.has_game_started() -> no dump
-        
+
         // Scenario 2: Game started but no BINGO - should dump
         // (We can't easily simulate this without complex setup, but we can verify the logic)
         // Logic: game.has_game_started() && !game.is_bingo_reached() -> dump
-        
+
         // Scenario 3: Game with BINGO reached - should not dump (already dumped)
         // Logic: game.has_game_started() && game.is_bingo_reached() -> no dump
-        
+
         // For now, just verify the boolean logic conditions are accessible
         assert!(!game.has_game_started());
         assert!(!game.is_bingo_reached());
@@ -517,22 +517,22 @@ mod tests {
     #[test]
     fn test_running_game_info() {
         let game = Game::new();
-        
+
         // Test get_running_game_info method
         let (game_id, created_at_string, created_at_systemtime) = game.get_running_game_info();
-        
+
         // Verify the returned values
         assert!(!game_id.is_empty());
         assert!(game_id.starts_with("game_"));
         assert_eq!(game_id.len(), 13); // "game_" + 8 hex chars
         assert_eq!(game_id, game.id());
-        
+
         // Verify creation time consistency
         assert!(!created_at_string.is_empty());
         assert!(created_at_string.contains("UTC"));
         assert_eq!(created_at_string, game.created_at_string());
         assert_eq!(created_at_systemtime, game.created_at());
-        
+
         // Verify the SystemTime is recent (within last few seconds)
         let now = SystemTime::now();
         let time_diff = now.duration_since(created_at_systemtime).unwrap_or_default();

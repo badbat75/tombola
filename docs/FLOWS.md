@@ -21,56 +21,56 @@ sequenceDiagram
     participant S as Tombola Server
     participant BC as Board Client
     participant PC as Player Client
-    
+
     Note over S: Server starts with clean game state
-    
+
     BC->>S: GET /status
     S-->>BC: Game state (no extractions yet)
-    
+
     PC->>S: POST /register
     Note over PC: {"name": "player1", "client_type": "player"}
     S-->>PC: Registration successful (client_id)
-    
+
     PC->>S: GET /listassignedcards
     Note over PC: Using X-Client-ID header
     S-->>PC: List of assigned cards
-    
+
     PC->>S: GET /getassignedcard/{card_id}
     S-->>PC: Card details and numbers
-    
+
     Note over BC: User presses key to extract number
     BC->>S: POST /extract
     Note over BC: Using special client ID "0000000000000000"
     S-->>BC: Number extracted from pouch
-    
+
     BC->>S: GET /board
     S-->>BC: Updated board with extracted numbers
-    
+
     BC->>S: GET /scoremap
     S-->>BC: Current scores and achievements
-    
+
     Note over PC: Monitoring loop every 2 seconds
     PC->>S: GET /board
     S-->>PC: Current extracted numbers
-    
+
     PC->>S: GET /scoremap
     S-->>PC: Current scorecard
-    
+
     PC->>S: GET /getassignedcard/{card_id}
     S-->>PC: Updated card info
-    
+
     Note over PC: Display cards with highlights
-    
+
     loop Until BINGO or Exit
         BC->>S: POST /extract
         S-->>BC: Next number
-        
+
         PC->>S: GET /board
         S-->>PC: Updated board
-        
+
         PC->>S: GET /scoremap
         S-->>PC: Updated scores
-        
+
         alt Achievement reached
             Note over S: Score updated (2,3,4,5 in line or BINGO)
             PC->>S: GET /scoremap
@@ -86,37 +86,37 @@ sequenceDiagram
     participant S as Tombola Server
     participant BC as Board Client (--exit)
     participant PC as Player Client (--exit)
-    
+
     Note over S: Server running with existing game state
-    
+
     BC->>S: GET /status
     S-->>BC: Current game state
-    
+
     BC->>S: GET /board
     S-->>BC: Current extracted numbers
-    
+
     BC->>S: GET /scoremap
     S-->>BC: Current scorecard
-    
+
     Note over BC: Display state once and exit
     BC-->>BC: Exit (no loop)
-    
+
     PC->>S: POST /register
     Note over PC: {"name": "monitor", "client_type": "player"}
     S-->>PC: Registration successful
-    
+
     PC->>S: GET /listassignedcards
     S-->>PC: Assigned cards
-    
+
     PC->>S: GET /board
     S-->>PC: Extracted numbers
-    
+
     PC->>S: GET /scoremap
     S-->>PC: Current scorecard
-    
+
     PC->>S: GET /getassignedcard/{card_id}
     S-->>PC: Card details
-    
+
     Note over PC: Display cards with highlights once and exit
     PC-->>PC: Exit (no monitoring loop)
 ```
@@ -127,26 +127,26 @@ sequenceDiagram
 sequenceDiagram
     participant S as Tombola Server
     participant BC as Board Client (--newgame)
-    
+
     Note over S: Server running with existing game state
-    
+
     BC->>S: POST /newgame
     Note over BC: Using special client ID "0000000000000000"
     S-->>BC: Game reset confirmation
-    
+
     Note over S: All components reset:
     Note over S: - Board cleared
     Note over S: - Pouch refilled
     Note over S: - ScoreCard reset
     Note over S: - Cards cleared
     Note over S: - New game ID generated
-    
+
     BC->>S: GET /status
     S-->>BC: Fresh game state
-    
+
     BC->>S: GET /runninggameid
     S-->>BC: New game ID and timestamp
-    
+
     alt --exit flag used
         Note over BC: Display state once and exit
         BC-->>BC: Exit
@@ -179,7 +179,7 @@ sequenceDiagram
 sequenceDiagram
     participant C as Client
     participant S as Server
-    
+
     C->>S: Request with X-Client-ID header
     alt Valid Client ID
         S-->>C: Success response
@@ -216,23 +216,23 @@ sequenceDiagram
 sequenceDiagram
     participant C as Client
     participant S as Server
-    
+
     alt Registration after extraction
         C->>S: POST /register
         Note over S: Numbers already extracted
         S-->>C: 409 Conflict
     end
-    
+
     alt Missing authentication
         C->>S: Authenticated endpoint without X-Client-ID
         S-->>C: 401 Unauthorized
     end
-    
+
     alt Invalid client ID
         C->>S: Request with invalid X-Client-ID
         S-->>C: 401 Unauthorized
     end
-    
+
     alt Extraction by non-board client
         C->>S: POST /extract
         Note over C: Using regular client ID
@@ -269,13 +269,13 @@ Game state is automatically saved to `data/games/` directory in the following sc
 sequenceDiagram
     participant S as Tombola Server
     participant FS as File System
-    
+
     alt BINGO Achieved
         Note over S: Score reaches 15 (BINGO)
         S->>FS: Save complete game to {game_id}_{timestamp}.json
         Note over FS: Game marked as completed
     end
-    
+
     alt New Game Started
         Note over S: POST /newgame called
         alt Incomplete game exists
@@ -284,7 +284,7 @@ sequenceDiagram
         end
         Note over S: Initialize new game with new ID
     end
-    
+
     alt Manual Dump Requested
         Note over S: POST /dumpgame called (Board Client only)
         S->>FS: Save current game to {game_id}_{timestamp}.json
@@ -297,7 +297,7 @@ sequenceDiagram
 - **Naming**: `{game_id}_{timestamp}.json` format
 - **Content**: Complete game state including:
   - Board state (extracted numbers)
-  - Pouch state (remaining numbers)  
+  - Pouch state (remaining numbers)
   - ScoreCard (current scores and achievements)
   - Client registry (all registered clients)
   - Card assignments (all assigned cards)

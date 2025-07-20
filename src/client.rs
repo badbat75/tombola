@@ -53,17 +53,17 @@ impl ClientInfo {
     // Generate a unique client ID based on name and client type
     pub fn generate_client_id(name: &str, client_type: &str) -> String {
         let mut hasher = DefaultHasher::new();
-        
+
         // Hash the client info with current timestamp for uniqueness
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        
+
         hasher.write(name.as_bytes());
         hasher.write(client_type.as_bytes());
         hasher.write(&timestamp.to_be_bytes());
-        
+
         format!("{:016X}", hasher.finish())
     }
 
@@ -128,7 +128,7 @@ impl ClientRegistry {
         if client_id == BOARDCLIENT_ID {
             return Some("Board".to_string());
         }
-        
+
         for client_info in self.clients.values() {
             if client_info.id == client_id {
                 return Some(client_info.name.to_string());

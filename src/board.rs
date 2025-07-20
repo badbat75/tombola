@@ -15,7 +15,7 @@ pub fn board_client_id() -> String {
     BOARD_ID.to_string()
 }
 
-/// Returns the board's card ID as a String  
+/// Returns the board's card ID as a String
 #[inline]
 pub fn board_card_id() -> String {
     BOARD_ID.to_string()
@@ -48,23 +48,23 @@ impl Board {
             marked_numbers: HashSet::new(),
         }
     }
-    
+
     pub fn push(&mut self, entry: Number, scorecard: &ScoreCard) -> Number {
         self.numbers.push(entry);
-        
+
         // Calculate score and numbers to mark
         let (score, numbers_to_mark) = scorecard.board_calculate_score(&self.numbers);
-        
+
         // Update marked numbers based on scoring
         self.update_marked_numbers(numbers_to_mark);
-        
+
         score
     }
-    
+
     pub fn push_simple(&mut self, entry: Number) {
         self.numbers.push(entry);
     }
-    
+
     pub fn update_marked_numbers(&mut self, numbers_to_mark: Vec<Number>) {
         if !numbers_to_mark.is_empty() {
             self.marked_numbers.clear();
@@ -73,19 +73,19 @@ impl Board {
             }
         }
     }
-    
+
     pub fn get_numbers(&self) -> &Vec<Number> {
         &self.numbers
     }
-    
+
     pub fn len(&self) -> usize {
         self.numbers.len()
     }
-    
+
     pub fn is_empty(&self) -> bool {
         self.numbers.is_empty()
     }
-    
+
     pub fn get_sorted_entries(&self) -> Vec<(Number, bool)> {
         let mut sorted: Vec<_> = self.numbers.iter()
             .map(|&number| (number, self.marked_numbers.contains(&number)))
@@ -93,7 +93,7 @@ impl Board {
         sorted.sort_by_key(|&(number, _)| number);
         sorted
     }
-    
+
     pub fn get_last_numbers(&self, n: usize) -> Vec<Number> {
         if self.numbers.len() <= 1 {
             return Vec::new();

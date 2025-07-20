@@ -20,15 +20,15 @@ impl Pouch {
             numbers,
         }
     }
-    
+
     pub fn len(&self) -> usize {
         self.numbers.len()
     }
-    
+
     pub fn is_empty(&self) -> bool {
         self.numbers.is_empty()
     }
-    
+
     fn remove(&mut self, index: usize) -> Number {
         self.numbers.remove(index)
     }

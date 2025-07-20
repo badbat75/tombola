@@ -1,7 +1,7 @@
 // src/board_client.rs
 // This module provides a terminal client that retrieves board and scorecard data from the API,
 // displays it using the terminal functions, and allows interactive number extraction.
-// 
+//
 // Interactive Controls:
 // - ENTER: Extract a number using the /extract API endpoint
 // - F5: Refresh screen and re-fetch fresh data from server without extracting
@@ -25,7 +25,7 @@ struct Args {
     /// Reset the game state before starting the client
     #[arg(long)]
     newgame: bool,
-    
+
     /// Exit after displaying the current state (no interactive loop)
     #[arg(long)]
     exit: bool,
@@ -37,12 +37,12 @@ fn extract_highest_achievement_numbers(scorecard: &tombola::score::ScoreCard) ->
     if scorecard.published_score < 2 {
         return Vec::new();
     }
-    
+
     // Look for the highest score achieved by the board client
     let score_map = scorecard.get_scoremap();
     let mut board_client_highest_score = 0;
     let mut board_client_numbers = Vec::new();
-    
+
     // Find the board client's highest achievement
     for (score_level, achievements) in score_map.iter() {
         for achievement in achievements {
@@ -52,7 +52,7 @@ fn extract_highest_achievement_numbers(scorecard: &tombola::score::ScoreCard) ->
             }
         }
     }
-    
+
     // Only show emphasis if the board client has the globally highest score
     if board_client_highest_score == scorecard.published_score && board_client_highest_score >= 2 {
         board_client_numbers
@@ -73,35 +73,35 @@ pub async fn run_client_with_exit_flag(exit_after_display: bool) -> Result<(), B
     // Load client configuration
     let config = ClientConfig::load_or_default();
     let server_base_url = config.server_url();
-    
+
     // Main game loop
     loop {
         // Retrieve and display current game state
         let board_numbers = get_board_data(&server_base_url).await?;
-        
+
         // Retrieve scorecard data first
         let scorecard_data = get_scoremap(&server_base_url).await?;
-        
+
         // Retrieve game ID for display
         let game_id = get_game_id(&server_base_url).await.unwrap_or_else(|_| "Unknown".to_string());
-        
+
         // Create a board for display purposes and recreate the proper state
         let mut display_board = Board::new();
-        
+
         // Add all numbers from the API response using push_simple
         for number in board_numbers {
             display_board.push_simple(number);
         }
-        
+
         // Extract numbers to highlight from the highest achievement in the scorecard
         let numbers_to_highlight = extract_highest_achievement_numbers(&scorecard_data);
-        
+
         // Update the board's marked numbers with the highest achievement numbers
         display_board.update_marked_numbers(numbers_to_highlight);
-        
+
         // Retrieve pouch data
         let pouch_data = get_pouch_data(&server_base_url).await?;
-        
+
         // Display current state with client names resolved
         show_on_terminal_with_client_names(&display_board, &pouch_data, &scorecard_data, &server_base_url, &game_id).await;
 
@@ -160,14 +160,14 @@ pub async fn run_client_with_exit_flag(exit_after_display: bool) -> Result<(), B
     }
 
     println!("Client execution completed successfully.");
-    
+
     Ok(())
 }
 
 async fn test_server_connection(server_base_url: &str) -> Result<(), Box<dyn Error>> {
     let url = format!("{server_base_url}/status");
     let response = reqwest::get(&url).await?;
-    
+
     if response.status().is_success() {
         Ok(())
     } else {
@@ -178,7 +178,7 @@ async fn test_server_connection(server_base_url: &str) -> Result<(), Box<dyn Err
 async fn get_board_data(server_base_url: &str) -> Result<Vec<Number>, Box<dyn Error>> {
     let url = format!("{server_base_url}/board");
     let response = reqwest::get(&url).await?;
-    
+
     if response.status().is_success() {
         let board: Board = response.json().await?;
         Ok(board.get_numbers().clone())
@@ -190,7 +190,7 @@ async fn get_board_data(server_base_url: &str) -> Result<Vec<Number>, Box<dyn Er
 async fn get_pouch_data(server_base_url: &str) -> Result<Vec<Number>, Box<dyn Error>> {
     let url = format!("{server_base_url}/pouch");
     let response = reqwest::get(&url).await?;
-    
+
     if response.status().is_success() {
         let pouch: tombola::pouch::Pouch = response.json().await?;
         Ok(pouch.numbers)
@@ -202,13 +202,13 @@ async fn get_pouch_data(server_base_url: &str) -> Result<Vec<Number>, Box<dyn Er
 async fn extract_number(server_base_url: &str) -> Result<u8, Box<dyn Error>> {
     let client = reqwest::Client::new();
     let url = format!("{server_base_url}/extract");
-    
+
     let response = client
         .post(&url)
         .header("X-Client-ID", BOARD_ID) // Board client ID
         .send()
         .await?;
-    
+
     if response.status().is_success() {
         let extract_response: serde_json::Value = response.json().await?;
         if let Some(extracted_number) = extract_response["extracted_number"].as_u64() {
@@ -226,7 +226,7 @@ async fn extract_number(server_base_url: &str) -> Result<u8, Box<dyn Error>> {
 async fn get_scoremap(server_base_url: &str) -> Result<tombola::score::ScoreCard, Box<dyn Error>> {
     let url = format!("{server_base_url}/scoremap");
     let response = reqwest::get(&url).await?;
-    
+
     if response.status().is_success() {
         let scorecard: tombola::score::ScoreCard = response.json().await?;
         Ok(scorecard)
@@ -238,7 +238,7 @@ async fn get_scoremap(server_base_url: &str) -> Result<tombola::score::ScoreCard
 async fn get_game_id(server_base_url: &str) -> Result<String, Box<dyn Error>> {
     let url = format!("{server_base_url}/runninggameid");
     let response = reqwest::get(&url).await?;
-    
+
     if response.status().is_success() {
         let game_info: serde_json::Value = response.json().await?;
         if let (Some(game_id), Some(created_at)) = (
@@ -259,10 +259,10 @@ async fn get_client_name_by_id(server_base_url: &str, client_id: &str) -> Result
     if client_id == BOARD_ID {
         return Ok("Board".to_string());
     }
-    
+
     let url = format!("{server_base_url}/clientbyid/{client_id}");
     let response = reqwest::get(&url).await?;
-    
+
     if response.status().is_success() {
         let client_info: serde_json::Value = response.json().await?;
         if let Some(name) = client_info["name"].as_str() {
@@ -287,7 +287,7 @@ async fn show_on_terminal_with_client_names(
     // Display Game ID first
     println!("Game ID: {game_id}");
     println!();
-    
+
     // Get the last extracted number from the board
     let extracted = board.get_numbers().last().copied().unwrap_or(0);
 
@@ -313,18 +313,18 @@ async fn show_on_terminal_with_client_names(
                 x if *x == tombola::defs::NUMBERSPERCARD => print!("{}BINGO!!!{}", tombola::defs::Colors::yellow(), tombola::defs::Colors::reset()),
                 _ => {} // Handle all other cases (do nothing)
             }
-            
+
             // Display card IDs with resolved client names and their contributing numbers
             print!(" -> ");
             for (i, achievement) in score_achievements.iter().enumerate() {
                 if i > 0 { print!(", "); }
-                
+
                 // Resolve client name
                 let client_name = match get_client_name_by_id(server_base_url, &achievement.client_id).await {
                     Ok(name) => name,
                     Err(_) => format!("ID:{}", achievement.client_id),
                 };
-                
+
                 if achievement.numbers.is_empty() {
                     print!("{} [{}] (no numbers)", client_name, achievement.card_id);
                 } else {
@@ -335,7 +335,7 @@ async fn show_on_terminal_with_client_names(
         }
     }
 
-    if !pouch.is_empty() { 
+    if !pouch.is_empty() {
         println!("\nRemaining in pouch {}:", pouch.len());
         for &pouch_num in pouch {
             print!("{pouch_num:2} ");
@@ -349,23 +349,23 @@ async fn show_on_terminal_with_client_names(
 async fn call_newgame(server_base_url: &str) -> Result<(), Box<dyn Error>> {
     let client = reqwest::Client::new();
     let url = format!("{server_base_url}/newgame");
-    
+
     println!("🔄 Initiating new game...");
-    
+
     let response = client
         .post(&url)
         .header("X-Client-ID", BOARD_ID) // Board client ID
         .header("Content-Type", "application/json")
         .send()
         .await?;
-    
+
     if response.status().is_success() {
         let newgame_response: serde_json::Value = response.json().await?;
-        
+
         if let Some(message) = newgame_response["message"].as_str() {
             println!("✓ {message}");
         }
-        
+
         if let Some(components) = newgame_response["reset_components"].as_array() {
             for component in components {
                 if let Some(component_str) = component.as_str() {
@@ -373,7 +373,7 @@ async fn call_newgame(server_base_url: &str) -> Result<(), Box<dyn Error>> {
                 }
             }
         }
-        
+
         println!(); // Add blank line for readability
         Ok(())
     } else {
@@ -386,7 +386,7 @@ async fn call_newgame(server_base_url: &str) -> Result<(), Box<dyn Error>> {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    
+
     match run_client_with_args(args).await {
         Ok(_) => {
             println!("Client finished successfully.");
@@ -401,11 +401,11 @@ async fn main() {
 async fn run_client_with_args(args: Args) -> Result<(), Box<dyn Error>> {
     // Clear the screen first for a clean start
     print!("\x1Bc");
-    
+
     // Load client configuration
     let config = ClientConfig::load_or_default();
     let server_base_url = config.server_url();
-    
+
     println!("Tombola Terminal Client");
     print!("Connecting to server at {server_base_url}...");
 

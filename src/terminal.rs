@@ -111,7 +111,7 @@ pub fn show_on_terminal(
                 x if *x == NUMBERSPERCARD => print!("{}BINGO!!!{}", Colors::yellow(), Colors::reset()),
                 _ => {} // Handle all other cases (do nothing)
             }
-            
+
             // Display card IDs with client IDs and their contributing numbers
             print!(" -> ");
             for (i, achievement) in score_achievements.iter().enumerate() {
@@ -126,7 +126,7 @@ pub fn show_on_terminal(
         }
     }
 
-    if ! pouch.is_empty() { 
+    if ! pouch.is_empty() {
         println!("\nRemaining in pouch {}:", pouch.len());
         for &pouch_num in pouch {
             print!("{pouch_num:2} ");
