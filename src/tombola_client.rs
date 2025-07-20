@@ -260,7 +260,7 @@ async fn get_client_name_by_id(server_base_url: &str, client_id: &str) -> Result
         return Ok("Board".to_string());
     }
 
-    let url = format!("{server_base_url}/clientbyid/{client_id}");
+    let url = format!("{server_base_url}/clientinfo/{client_id}");
     let response = reqwest::get(&url).await?;
 
     if response.status().is_success() {
@@ -268,11 +268,11 @@ async fn get_client_name_by_id(server_base_url: &str, client_id: &str) -> Result
         if let Some(name) = client_info["name"].as_str() {
             Ok(name.to_string())
         } else {
-            Ok(format!("Unknown({client_id})"))
+            Ok("Unknown Client".to_string())
         }
     } else {
-        // Fallback to showing the client ID if lookup fails
-        Ok(format!("ID:{client_id}"))
+        // Fallback to showing a user-friendly message if lookup fails
+        Ok("Unknown Client".to_string())
     }
 }
 
@@ -322,7 +322,7 @@ async fn show_on_terminal_with_client_names(
                 // Resolve client name
                 let client_name = match get_client_name_by_id(server_base_url, &achievement.client_id).await {
                     Ok(name) => name,
-                    Err(_) => format!("ID:{}", achievement.client_id),
+                    Err(_) => "Unknown Client".to_string(),
                 };
 
                 if achievement.numbers.is_empty() {
