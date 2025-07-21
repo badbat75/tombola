@@ -594,10 +594,11 @@ pub async fn handle_newgame(
     match app_state.game.reset_game() {
         Ok(reset_components) => {
             log_info(&format!("Game reset successful for {}", app_state.game.game_info()));
+            // Log detailed reset components internally but provide simple response to API client
+            log_info(&format!("Reset components: {:?}", reset_components));
             Ok(Json(json!({
                 "success": true,
-                "message": "New game started successfully",
-                "reset_components": reset_components,
+                "message": "Game reset",
                 "game_id": app_state.game.id(),
                 "created_at": app_state.game.created_at_string()
             })))

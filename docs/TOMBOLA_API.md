@@ -61,13 +61,13 @@ Common HTTP status codes:
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/register` | Register a new client |
-| `GET` | `/client/{client_name}` | Get client information by name |
-| `GET` | `/clientbyid/{client_id}` | Get client information by ID |
+| `GET` | `/clientinfo` | Get client information by name (query parameter) |
+| `GET` | `/clientinfo/{client_id}` | Get client information by ID |
 
 ### Card Management
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/generatecardsforme` | Generate cards for authenticated client |
+| `POST` | `/generatecards` | Generate cards for authenticated client |
 | `GET` | `/listassignedcards` | List all assigned cards |
 | `GET` | `/getassignedcard/{card_id}` | Get specific card by ID |
 
@@ -88,7 +88,7 @@ Common HTTP status codes:
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/runninggameid` | Get current game ID and creation time |
-| `POST` | `/newgame` | Reset game state (board client only) |
+| `POST` | `/newgame` | **COMPLETE RESET** - Destroy all data and start fresh (board client only) |
 | `POST` | `/dumpgame` | Dump game state to JSON (board client only) |
 
 ## Endpoints
@@ -135,12 +135,17 @@ Register a new client with the tombola server.
 
 ### 2. Client Information
 
-#### GET /client/{client_name}
+#### GET /clientinfo
 
 Retrieve information about a registered client by name.
 
-**Path Parameters:**
-- `client_name`: Name of the client to retrieve
+**Query Parameters:**
+- `name`: Name of the client to retrieve
+
+**Example Request:**
+```
+GET /clientinfo?name=player1
+```
 
 **Response:**
 ```json
@@ -152,7 +157,7 @@ Retrieve information about a registered client by name.
 }
 ```
 
-#### GET /clientbyid/{client_id}
+#### GET /clientinfo/{client_id}
 
 Retrieve information about a registered client by client ID.
 
@@ -170,12 +175,12 @@ Retrieve information about a registered client by client ID.
 ```
 
 **Notes:**
-- Returns the same information as `/client/{client_name}` but uses client ID for lookup
+- Returns the same information as `/clientinfo` but uses client ID for lookup
 - Useful for resolving client names from client IDs in ScoreAchievement data
 
 ### 3. Card Management
 
-#### POST /generatecardsforme
+#### POST /generatecards
 
 Generate cards for a registered client.
 
@@ -363,7 +368,7 @@ Get overall server status and game information.
   "created_at": "2025-07-17 14:30:25 UTC",
   "numbers_extracted": 8,
   "scorecard": 5,
-  "server": "tokio-hyper"
+  "server": "axum"
 }
 ```
 
@@ -434,7 +439,14 @@ curl -X POST http://127.0.0.1:3000/extract \
 
 #### POST /newgame
 
-Reset all game state to start a new game.
+**COMPLETE GAME RESET** - Destroys all game state and persistent data to start a completely fresh game.
+
+**IMPORTANT**: This is a **destructive operation** that:
+- Forces ALL clients to re-register (all client sessions destroyed)
+- Destroys ALL card assignments (clients must get new cards)
+- Resets ALL game progress (board, pouch, scores completely recreated)
+- Generates a new unique game ID
+- Creates a fresh game timestamp
 
 **Authentication Required:** Yes (X-Client-ID header must be "0000000000000000")
 
@@ -451,15 +463,9 @@ curl -X POST http://127.0.0.1:3000/newgame \
 ```json
 {
   "success": true,
-  "message": "New game started successfully",
+  "message": "Game reset",
   "game_id": "game_87654321",
-  "created_at": "2025-07-17 14:35:12 UTC",
-  "reset_components": [
-    "Board state cleared",
-    "Pouch refilled with numbers 1-90",
-    "Score card reset",
-    "Card assignments cleared"
-  ]
+  "created_at": "2025-07-17 14:35:12 UTC"
 }
 ```
 
@@ -537,11 +543,12 @@ curl -X POST http://127.0.0.1:3000/dumpgame \
 - Dumps complete game state including board, pouch, scorecard, client registry, and card assignments
 - Files are saved in `data/games/` directory with format: `{game_id}_{timestamp}.json`
 - Can be called at any time during the game, not just when the game has ended
-- **Automatic Dumps**: Game state is automatically dumped when BINGO is reached, and incomplete games (no BINGO) are dumped on newgame
+- **Automatic Dumps**: Game state is automatically dumped when BINGO is reached, and incomplete games (no BINGO) are dumped on newgame **before complete destruction**
 - Contains full game history and state for analysis, debugging, and audit purposes
 - JSON structure includes creation timestamp, end timestamp, and all game components
 - Files use pretty-printed JSON for human readability
 - Game dumps are append-only (no overwriting of existing files)
+- **Important**: After `/newgame` reset, all client and card data is completely destroyed and cannot be recovered
 
 #### GET /runninggameid
 
@@ -624,12 +631,12 @@ curl -X POST http://127.0.0.1:3000/register \
 
 3. **Get client information by name:**
 ```bash
-curl http://127.0.0.1:3000/client/player1
+curl "http://127.0.0.1:3000/clientinfo?name=player1"
 ```
 
 3a. **Get client information by ID:**
 ```bash
-curl http://127.0.0.1:3000/clientbyid/A1B2C3D4E5F6G7H8
+curl http://127.0.0.1:3000/clientinfo/A1B2C3D4E5F6G7H8
 ```
 
 4. **List assigned cards:**
@@ -671,7 +678,7 @@ The server supports concurrent connections and uses Arc<Mutex<>> for thread-safe
 - **Port**: 3000
 - **Protocol**: HTTP/1.1
 - **Runtime**: Tokio async runtime
-- **HTTP Library**: Hyper with hyper-util
+- **HTTP Library**: Axum web framework
 
 ## Shutdown
 

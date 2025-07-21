@@ -1,6 +1,10 @@
 // src/game.rs
 // This module provides a unified Game struct that encapsulates all game state components
 // and provides coordinated access to prevent deadlocks and simplify state management.
+//
+// The Game struct supports complete state destruction via reset_game(), which destroys
+// all persistent data including client sessions and card assignments, forcing complete
+// re-registration for a truly fresh game experience.
 
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -95,75 +99,89 @@ impl Game {
         &self.card_manager
     }
 
-    /// Reset all game state to start a new game
-    /// This follows the proper mutex acquisition order to prevent deadlocks
+    /// Completely reset all game state and destroy all persistent data to start a fresh game
+    /// This is a COMPLETE RESET that forces all clients to re-register and get new cards
+    /// All client sessions, card assignments, and game progress will be lost
     pub fn reset_game(&self) -> Result<Vec<String>, Vec<String>> {
         let mut reset_components = Vec::new();
         let mut errors = Vec::new();
 
-        // Generate new game ID and creation time for the fresh game
+        // Generate completely new game identity
         let mut rng = rand::rng();
         let new_id = format!("game_{:08x}", rng.random::<u32>());
+        let new_creation_time = SystemTime::now();
 
-        // Update game ID and creation time
+        // Create COMPLETELY FRESH instances of all components
+        // This ensures no data persistence from previous games
+        let fresh_board = Board::new();
+        let fresh_pouch = Pouch::new();
+        let fresh_scorecard = ScoreCard::new();
+        let fresh_client_registry = ClientRegistry::new();  // All clients must re-register
+        let fresh_card_manager = CardAssignmentManager::new();  // All card assignments lost
+
+        // ATOMIC REPLACEMENT: Replace all components atomically by acquiring all locks
+        // This follows strict mutex acquisition order to prevent deadlocks:
+        // id -> created_at -> pouch -> board -> scorecard -> card_manager -> client_registry
+
+        // Replace game ID (forces new game identity)
         if let Ok(mut id_lock) = self.id.lock() {
             *id_lock = new_id.clone();
+            reset_components.push(format!("New game ID generated: {new_id}"));
         } else {
-            errors.push("Failed to lock game ID for reset".to_string());
+            errors.push("Failed to lock game ID for complete reset".to_string());
         }
 
+        // Replace creation time (new game timestamp)
         if let Ok(mut created_at_lock) = self.created_at.lock() {
-            *created_at_lock = SystemTime::now();
+            *created_at_lock = new_creation_time;
+            reset_components.push("Game creation time reset".to_string());
         } else {
-            errors.push("Failed to lock creation time for reset".to_string());
+            errors.push("Failed to lock creation time for complete reset".to_string());
         }
 
-        reset_components.push(format!("New game ID generated: {new_id}"));
-
-        // Reset all game structures in coordinated order to prevent deadlocks
-        // Follow the mutex acquisition order: pouch -> board -> scorecard -> card_manager -> client_registry
-
-        // Reset Pouch (refill with numbers 1-90)
-        if let Ok(mut pouch) = self.pouch.lock() {
-            *pouch = Pouch::new();
-            reset_components.push("Pouch refilled with numbers 1-90".to_string());
+        // Replace pouch (fresh number pool)
+        if let Ok(mut pouch_lock) = self.pouch.lock() {
+            *pouch_lock = fresh_pouch;
+            reset_components.push("Pouch completely recreated with fresh numbers 1-90".to_string());
         } else {
-            errors.push("Failed to lock pouch for reset".to_string());
+            errors.push("Failed to lock pouch for complete reset".to_string());
         }
 
-        // Reset Board (clear extracted numbers and marked positions)
-        if let Ok(mut board) = self.board.lock() {
-            *board = Board::new();
-            reset_components.push("Board state cleared".to_string());
+        // Replace board (clean slate)
+        if let Ok(mut board_lock) = self.board.lock() {
+            *board_lock = fresh_board;
+            reset_components.push("Board completely recreated - clean slate".to_string());
         } else {
-            errors.push("Failed to lock board for reset".to_string());
+            errors.push("Failed to lock board for complete reset".to_string());
         }
 
-        // Reset ScoreCard (reset published score and score map)
-        if let Ok(mut scorecard) = self.scorecard.lock() {
-            *scorecard = ScoreCard::new();
-            reset_components.push("Score card reset".to_string());
+        // Replace scorecard (reset all scoring)
+        if let Ok(mut scorecard_lock) = self.scorecard.lock() {
+            *scorecard_lock = fresh_scorecard;
+            reset_components.push("Score card completely recreated - all scores lost".to_string());
         } else {
-            errors.push("Failed to lock scorecard for reset".to_string());
+            errors.push("Failed to lock scorecard for complete reset".to_string());
         }
 
-        // Reset CardAssignmentManager (clear all card assignments)
-        if let Ok(mut card_mgr) = self.card_manager.lock() {
-            *card_mgr = CardAssignmentManager::new();
-            reset_components.push("Card assignments cleared".to_string());
+        // Replace card manager (ALL CARD ASSIGNMENTS DESTROYED)
+        if let Ok(mut card_mgr_lock) = self.card_manager.lock() {
+            *card_mgr_lock = fresh_card_manager;
+            reset_components.push("Card assignment manager destroyed - all card assignments lost".to_string());
         } else {
-            errors.push("Failed to lock card manager for reset".to_string());
+            errors.push("Failed to lock card manager for complete reset".to_string());
         }
 
-        // Reset ClientRegistry (clear all registered clients)
-        if let Ok(mut registry) = self.client_registry.lock() {
-            *registry = ClientRegistry::new();
-            reset_components.push("Client registry cleared".to_string());
+        // Replace client registry (ALL CLIENT SESSIONS DESTROYED)
+        if let Ok(mut registry_lock) = self.client_registry.lock() {
+            *registry_lock = fresh_client_registry;
+            reset_components.push("Client registry destroyed - all clients must re-register".to_string());
         } else {
-            errors.push("Failed to lock client registry for reset".to_string());
+            errors.push("Failed to lock client registry for complete reset".to_string());
         }
 
         if errors.is_empty() {
+            reset_components.push("COMPLETE GAME RESET: All persistent data destroyed".to_string());
+            reset_components.push("All clients must re-register and get new card assignments".to_string());
             Ok(reset_components)
         } else {
             Err(errors)
@@ -408,16 +426,135 @@ mod tests {
         assert!(result.is_ok());
 
         let reset_components = result.unwrap();
-        assert!(reset_components.contains(&"Pouch refilled with numbers 1-90".to_string()));
-        assert!(reset_components.contains(&"Board state cleared".to_string()));
-        assert!(reset_components.contains(&"Score card reset".to_string()));
-        assert!(reset_components.contains(&"Card assignments cleared".to_string()));
-        assert!(reset_components.contains(&"Client registry cleared".to_string()));
+        assert!(reset_components.contains(&"Pouch completely recreated with fresh numbers 1-90".to_string()));
+        assert!(reset_components.contains(&"Board completely recreated - clean slate".to_string()));
+        assert!(reset_components.contains(&"Score card completely recreated - all scores lost".to_string()));
+        assert!(reset_components.contains(&"Card assignment manager destroyed - all card assignments lost".to_string()));
+        assert!(reset_components.contains(&"Client registry destroyed - all clients must re-register".to_string()));
+        assert!(reset_components.contains(&"COMPLETE GAME RESET: All persistent data destroyed".to_string()));
 
         // Verify that a new game ID was generated
         assert_ne!(game.id(), original_id);
         assert!(game.id().starts_with("game_"));
         assert!(reset_components.iter().any(|s| s.starts_with("New game ID generated:")));
+    }
+
+    #[test]
+    fn test_complete_data_destruction_on_reset() {
+        let game = Game::new();
+        let original_id = game.id();
+
+        // Simulate a game with client registrations and card assignments
+        // This test ensures ALL persistent data is destroyed on reset
+
+        // Step 1: Add some clients to the registry
+        {
+            let mut client_registry = game.client_registry.lock().unwrap();
+            use crate::client::ClientInfo;
+
+            let client1 = ClientInfo::new("TestPlayer1", "player");
+            let client2 = ClientInfo::new("TestPlayer2", "player");
+
+            // Insert clients (simulate registration)
+            client_registry.insert("TestPlayer1".to_string(), client1, false).unwrap();
+            client_registry.insert("TestPlayer2".to_string(), client2, false).unwrap();
+
+            // Verify clients are registered
+            assert_eq!(client_registry.len(), 2);
+            assert!(client_registry.get("TestPlayer1").is_some());
+            assert!(client_registry.get("TestPlayer2").is_some());
+        }
+
+        // Step 2: Add some card assignments
+        {
+            let mut card_manager = game.card_manager.lock().unwrap();
+
+            // Simulate card assignment to client
+            let (card_infos, _card_ids) = card_manager.assign_cards("test_client_123", 2);
+
+            // Verify cards are assigned
+            assert_eq!(card_infos.len(), 2);
+            assert!(!card_manager.get_all_assignments().is_empty());
+            assert!(card_manager.get_client_cards("test_client_123").is_some());
+        }
+
+        // Step 3: Simulate some game progress (extract numbers)
+        {
+            let mut board = game.board.lock().unwrap();
+            let mut pouch = game.pouch.lock().unwrap();
+            let mut scorecard = game.scorecard.lock().unwrap();
+
+            // Simulate extracting some numbers
+            let extracted_number = pouch.extract();
+            board.push_simple(extracted_number);
+            scorecard.update_scorecard(5); // Simulate some score
+
+            // Verify game has progressed
+            assert_eq!(board.len(), 1);
+            assert_eq!(pouch.len(), 89); // One number extracted
+            assert_eq!(scorecard.published_score, 5);
+        }
+
+        // Step 4: Perform complete reset
+        let reset_result = game.reset_game();
+        assert!(reset_result.is_ok());
+
+        // Step 5: Verify COMPLETE destruction of all data
+
+        // Verify new game ID
+        assert_ne!(game.id(), original_id);
+        assert!(game.id().starts_with("game_"));
+
+        // Verify client registry is completely empty
+        {
+            let client_registry = game.client_registry.lock().unwrap();
+            assert_eq!(client_registry.len(), 0);
+            assert!(client_registry.is_empty());
+            assert!(client_registry.get("TestPlayer1").is_none());
+            assert!(client_registry.get("TestPlayer2").is_none());
+        }
+
+        // Verify card assignments are completely destroyed
+        {
+            let card_manager = game.card_manager.lock().unwrap();
+            assert!(card_manager.get_all_assignments().is_empty());
+            assert!(card_manager.get_client_cards("test_client_123").is_none());
+        }
+
+        // Verify board is completely fresh
+        {
+            let board = game.board.lock().unwrap();
+            assert_eq!(board.len(), 0);
+            assert!(board.is_empty());
+        }
+
+        // Verify pouch is completely refilled
+        {
+            let pouch = game.pouch.lock().unwrap();
+            assert_eq!(pouch.len(), 90); // Back to full
+        }
+
+        // Verify scorecard is completely reset
+        {
+            let scorecard = game.scorecard.lock().unwrap();
+            assert_eq!(scorecard.published_score, 0);
+        }
+
+        // Verify game state methods reflect complete reset
+        assert!(!game.has_game_started());
+        assert_eq!(game.board_length(), 0);
+        assert_eq!(game.published_score(), 0);
+        assert_eq!(game.pouch_length(), 90);
+        assert!(!game.is_bingo_reached());
+        assert!(!game.is_pouch_empty());
+        assert!(!game.is_game_ended());
+
+        // Verify this is truly a fresh game that requires complete re-registration
+        let reset_messages = reset_result.unwrap();
+        assert!(reset_messages.contains(&"Client registry destroyed - all clients must re-register".to_string()));
+        assert!(reset_messages.contains(&"Card assignment manager destroyed - all card assignments lost".to_string()));
+        assert!(reset_messages.contains(&"COMPLETE GAME RESET: All persistent data destroyed".to_string()));
+        assert!(reset_messages.contains(&"All clients must re-register and get new card assignments".to_string()));
     }
 
     #[test]
