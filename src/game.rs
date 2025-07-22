@@ -461,6 +461,35 @@ impl Game {
         self.is_bingo_reached() || self.is_pouch_empty()
     }
 
+    /// Get the number of registered players (excluding board client if any)
+    pub fn player_count(&self) -> usize {
+        if let Ok(registry) = self.client_registry.lock() {
+            registry.len()
+        } else {
+            0
+        }
+    }
+
+    /// Get the total number of cards assigned in this game
+    pub fn card_count(&self) -> usize {
+        if let Ok(manager) = self.card_manager.lock() {
+            manager.get_all_assignments().len()
+        } else {
+            0
+        }
+    }
+
+    /// Get the current game status
+    pub fn status(&self) -> GameStatus {
+        if self.is_bingo_reached() {
+            GameStatus::Closed
+        } else if self.has_game_started() {
+            GameStatus::Active
+        } else {
+            GameStatus::New
+        }
+    }
+
     /// Get running game ID and creation details
     pub fn get_running_game_info(&self) -> (String, String, SystemTime) {
         (

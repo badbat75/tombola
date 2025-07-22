@@ -508,23 +508,42 @@ Get overall server status and specific game information.
 **Response:**
 ```json
 {
-  "status": "running",
+  "status": "new",
   "game_id": "game_12345678",
   "created_at": "2025-07-17 14:30:25 UTC",
+  "players": "4",
+  "cards": "20",
   "numbers_extracted": 8,
-  "scorecard": 5,
-  "server": "axum"
+  "scorecard": 5
+}
+```
+
+**Response (for closed game):**
+```json
+{
+  "status": "closed",
+  "game_id": "game_12345678",
+  "created_at": "2025-07-17 14:30:25 UTC",
+  "closed_at": "2025-07-17 15:45:10 UTC",
+  "players": "4",
+  "cards": "20",
+  "numbers_extracted": 45,
+  "scorecard": 15
 }
 ```
 
 **Notes:**
+- `status`: Current game state - one of "new", "active", or "closed"
+  - `new`: No numbers have been extracted yet
+  - `active`: At least one number has been extracted but BINGO hasn't been reached
+  - `closed`: BINGO has been reached (scorecard = 15)
 - `game_id`: Unique 8-digit hexadecimal identifier for the specific game
 - `created_at`: Human-readable timestamp when this specific game was created
+- `closed_at`: Human-readable timestamp when the game was closed (only present if status is "closed")
+- `players`: Number of registered players in this game (as string)
+- `cards`: Total number of cards assigned in this game (as string)
 - `numbers_extracted`: Total count of numbers extracted so far in this game
 - `scorecard`: Current published score (highest achievement level reached) in this game
-- `server`: Server implementation identifier
-
-- `server`: Server implementation identifier
 
 #### POST /{game_id}/extract
 

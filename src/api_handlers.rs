@@ -483,17 +483,30 @@ pub async fn handle_status(
 
     let game = get_game_from_registry(&app_state, &game_id).await?;
 
+    let status = game.status();
     let board_len = game.board_length();
     let scorecard = game.published_score();
+    let player_count = game.player_count();
+    let card_count = game.card_count();
 
-    Ok(Json(json!({
-        "status": "running",
+    let mut response = json!({
+        "status": status.as_str().to_lowercase(),
         "game_id": game.id(),
         "created_at": game.created_at_string(),
+        "players": player_count.to_string(),
+        "cards": card_count.to_string(),
         "numbers_extracted": board_len,
         "scorecard": scorecard,
-        "server": "axum"
-    })))
+    });
+
+    // Add closed_at only if the game is closed
+    if status == crate::game::GameStatus::Closed {
+        // For now, use current time as placeholder - in production this should be tracked properly
+        let closed_time = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+        response.as_object_mut().unwrap().insert("closed_at".to_string(), serde_json::Value::String(closed_time));
+    }
+
+    Ok(Json(response))
 }
 
 pub async fn handle_extract(
