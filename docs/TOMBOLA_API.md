@@ -2,25 +2,47 @@
 
 ## Overview
 
-The Tombola API provides a RESTful HTTP interface for managing tombola games, client registration, and card management. The server runs on `http://127.0.0.1:3000` and uses JSON for request/response payloads.
+The Tombola API provides a RESTful HTTP interface for managing multiple concurrent tombola games, client registration, and card management. The server runs on `http://127.0.0.1:3000` and uses JSON for request/response payloads.
 
-## Game Architecture
+## Multi-Game Architecture
 
-The Tombola server uses a unified **Game super struct** that encapsulates all game state components:
+The Tombola server uses a **GameRegistry** system that supports multiple concurrent games with complete isolation:
 
+- **Game-Specific Routing**: All game operations use `/{game_id}/` routing pattern for complete isolation
 - **Unique Game IDs**: Each game instance has a randomly generated 8-digit hexadecimal identifier (format: `game_12345678`)
 - **Creation Timestamps**: Games include creation timestamps for tracking and debugging purposes
-- **Thread-Safe Components**: All game state is managed through coordinated `Arc<Mutex<T>>` access
-- **State Components**: Board, Pouch, ScoreCard, ClientRegistry, and CardAssignmentManager
-- **Enhanced Responses**: Game ID and creation time are included in status and reset API responses
+- **Thread-Safe Components**: All game state is managed through coordinated `Arc<Mutex<T>>` access per game
+- **State Components**: Board, Pouch, ScoreCard, ClientRegistry, and CardAssignmentManager per game
+- **Enhanced Responses**: Game ID and creation time are included in status and management API responses
+- **Game Management**: Global endpoints for game creation (`/newgame`) and discovery (`/gameslist`)
 
 ## Base URL
 ```
 http://127.0.0.1:3000
 ```
+
+## Routing Patterns
+
+### Global Endpoints (No Game ID)
+- `/newgame` - Create new game
+- `/gameslist` - List all available games
+
+### Game-Specific Endpoints
+- `/{game_id}/register` - Register to specific game
+- `/{game_id}/status` - Get specific game status
+- `/{game_id}/board` - Get board state for game
+- `/{game_id}/extract` - Extract number in game
+- All other game operations follow `/{game_id}/endpoint` pattern
+
 ## Authentication
 
-Most endpoints require client authentication via the `X-Client-ID` header. Clients must register first to obtain a client ID.
+Client authentication is required for most game-specific endpoints via the `X-Client-ID` header. Clients must register to specific games first to obtain access.
+
+### Special Client IDs
+- **Board Client**: Uses special client ID `"0000000000000000"` (16 zeros)
+  - Can extract numbers, create games, and dump game state
+  - No registration required for any game
+- **Player Clients**: Must register separately to each game they want to join
 
 ## Common Headers
 
@@ -57,47 +79,111 @@ Common HTTP status codes:
 
 ## API Endpoints Index
 
-### Client Registry
+### Game Management
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/register` | Register a new client |
-| `GET` | `/clientinfo` | Get client information by name (query parameter) |
-| `GET` | `/clientinfo/{client_id}` | Get client information by ID |
+| `POST` | `/newgame` | Create a new game (board client only) |
+| `GET` | `/gameslist` | List all available games with status |
+| `GET` | `/clientinfo` | Get client information by name (query parameter) - **Global** |
+| `GET` | `/clientinfo/{client_id}` | Get client information by ID - **Global** |
 
-### Card Management
+### Client Registry (Game-Specific)
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/generatecards` | Generate cards for authenticated client |
-| `GET` | `/listassignedcards` | List all assigned cards |
-| `GET` | `/getassignedcard/{card_id}` | Get specific card by ID |
+| `POST` | `/{game_id}/register` | Register a new client to specific game |
 
-### Board & Game State
+### Card Management (Game-Specific)
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/board` | Get extracted numbers |
-| `GET` | `/pouch` | Get remaining numbers |
-| `GET` | `/status` | Get overall game status |
-| `POST` | `/extract` | Extract next number (board client only) |
+| `POST` | `/{game_id}/generatecards` | Generate cards for authenticated client in game |
+| `GET` | `/{game_id}/listassignedcards` | List assigned cards for client in game |
+| `GET` | `/{game_id}/getassignedcard/{card_id}` | Get specific card by ID in game |
 
-### Score Management
+### Board & Game State (Game-Specific)
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/scoremap` | Get current scores and achievements |
+| `GET` | `/{game_id}/board` | Get extracted numbers for game |
+| `GET` | `/{game_id}/pouch` | Get remaining numbers for game |
+| `GET` | `/{game_id}/status` | Get overall status for specific game |
+| `POST` | `/{game_id}/extract` | Extract next number in game (board client only) |
 
-### Game Administration
+### Score Management (Game-Specific)
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/runninggameid` | Get current game ID and creation time |
-| `POST` | `/newgame` | **COMPLETE RESET** - Destroy all data and start fresh (board client only) |
-| `POST` | `/dumpgame` | Dump game state to JSON (board client only) |
+| `GET` | `/{game_id}/scoremap` | Get current scores and achievements for game |
+
+### Game Administration (Game-Specific)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/{game_id}/dumpgame` | Dump specific game state to JSON (board client only) |
 
 ## Endpoints
 
-### 1. Client Registration
+### 1. Game Management
 
-#### POST /register
+#### POST /newgame
 
-Register a new client with the tombola server.
+Create a new game instance in the GameRegistry. This endpoint does not destroy existing games but creates a new isolated game.
+
+**Authentication Required:** Board Client ID (`"0000000000000000"`)
+
+**Success Response (200 OK):**
+```json
+{
+  "message": "New game created",
+  "game_id": "game_12345678",
+  "created_at": "2025-07-22 08:51:49 UTC"
+}
+```
+
+**Notes:**
+- **Multi-Game Behavior**: Creates a completely new game instance without affecting existing games
+- Only the board client can create new games
+- Returns unique game ID for the new game instance
+- New game is immediately available for client registration
+- Existing games continue to operate independently
+
+#### GET /gameslist
+
+List all available games with their current status and statistics.
+
+**No Authentication Required**
+
+**Success Response (200 OK):**
+```json
+{
+  "games": [
+    {
+      "game_id": "game_12345678",
+      "status": "New",
+      "created_at": "2025-07-22 08:51:49 UTC",
+      "client_count": 0,
+      "extracted_numbers": 0
+    },
+    {
+      "game_id": "game_87654321",
+      "status": "Active",
+      "created_at": "2025-07-22 08:45:12 UTC",
+      "client_count": 3,
+      "extracted_numbers": 15
+    }
+  ]
+}
+```
+
+**Notes:**
+- Used by smart clients for automatic game discovery
+- Shows all games regardless of their state
+- Includes game statistics for informed decision making
+
+### 2. Client Registration (Game-Specific)
+
+#### POST /{game_id}/register
+
+Register a new client to a specific game.
+
+**Path Parameters:**
+- `game_id`: ID of the game to register to (e.g., `game_12345678`)
 
 **Request Body:**
 ```json
@@ -112,32 +198,40 @@ Register a new client with the tombola server.
 ```json
 {
   "client_id": "A1B2C3D4E5F6G7H8",
-  "message": "Client 'client_name' registered successfully"
+  "message": "Client 'client_name' registered successfully to game game_12345678"
 }
 ```
 
 **Error Response - Registration After Game Started (409 Conflict):**
 ```json
 {
-  "error": "Cannot register new clients after numbers have been extracted"
+  "error": "Cannot register new clients after numbers have been extracted in this game"
+}
+```
+
+**Error Response - Game Not Found (404 Not Found):**
+```json
+{
+  "error": "Game game_12345678 not found"
 }
 ```
 
 **Notes:**
-- **Game State Restriction**: New clients can only be registered when no numbers have been extracted from the pouch
-- Once the first number is extracted, all new registration attempts will fail with a 409 Conflict error
+- **Game Isolation**: Registration is specific to the game ID in the path
+- **Game State Restriction**: New clients can only be registered when no numbers have been extracted from the pouch in this specific game
+- Once the first number is extracted in a game, all new registration attempts to that game will fail with a 409 Conflict error
 - This ensures fair play by preventing players from joining mid-game
-- **Client-Side Card Optimization**: Smart clients (like `tombola-player`) will first register without requesting cards, then check if cards are already assigned before generating new ones. This avoids unnecessary card generation requests for already-registered clients.
+- **Client-Side Card Optimization**: Smart clients will first register without requesting cards, then check if cards are already assigned before generating new ones
 - If `nocard` is not specified, the server will automatically generate 1 card for the client by default
 - If `nocard` is specified, the server will generate and assign the requested number of cards to the client
-- If client already exists, returns existing client information
+- If client already exists in this game, returns existing client information
 - Client ID is generated using a hash of name, type, and timestamp
 
-### 2. Client Information
+### 3. Client Information (Global)
 
 #### GET /clientinfo
 
-Retrieve information about a registered client by name.
+Retrieve information about a registered client by name across all games.
 
 **Query Parameters:**
 - `name`: Name of the client to retrieve
@@ -159,7 +253,7 @@ GET /clientinfo?name=player1
 
 #### GET /clientinfo/{client_id}
 
-Retrieve information about a registered client by client ID.
+Retrieve information about a registered client by client ID across all games.
 
 **Path Parameters:**
 - `client_id`: Client ID of the client to retrieve
@@ -175,14 +269,18 @@ Retrieve information about a registered client by client ID.
 ```
 
 **Notes:**
-- Returns the same information as `/clientinfo` but uses client ID for lookup
-- Useful for resolving client names from client IDs in ScoreAchievement data
+- These are **global** routes that search across all games in the GameRegistry
+- Returns information about clients regardless of which specific game they're registered to
+- Client data can span multiple games - same client can exist in multiple games
 
-### 3. Card Management
+### 4. Card Management (Game-Specific)
 
-#### POST /generatecards
+#### POST /{game_id}/generatecards
 
-Generate cards for a registered client.
+Generate cards for a registered client within a specific game.
+
+**Path Parameters:**
+- `game_id`: ID of the game (e.g., `game_12345678`)
 
 **Headers:**
 - `X-Client-ID: <client_id>` (required)
@@ -207,19 +305,24 @@ Generate cards for a registered client.
       ]
     }
   ],
-  "message": "Generated 6 cards successfully"
+  "message": "Generated 6 cards successfully for game game_12345678"
 }
 ```
 
 **Notes:**
-- Card generation is only allowed during registration or if client has no existing cards
+- Card generation is specific to the game and client
+- Only allowed during registration or if client has no existing cards in this game
 - Each card is a 3x9 grid following tombola rules
 - `null` represents empty cells in the card
 - Cards are generated in groups of 6 with anti-adjacency patterns
+- Cards are isolated per game - same client can have different cards in different games
 
-#### GET /listassignedcards
+#### GET /{game_id}/listassignedcards
 
-List all cards assigned to a client.
+List all cards assigned to a client within a specific game.
+
+**Path Parameters:**
+- `game_id`: ID of the game (e.g., `game_12345678`)
 
 **Headers:**
 - `X-Client-ID: <client_id>` (required)
@@ -240,11 +343,12 @@ List all cards assigned to a client.
 }
 ```
 
-#### GET /getassignedcard/{card_id}
+#### GET /{game_id}/getassignedcard/{card_id}
 
-Retrieve a specific card assigned to a client.
+Retrieve a specific card assigned to a client within a specific game.
 
 **Path Parameters:**
+- `game_id`: ID of the game (e.g., `game_12345678`)
 - `card_id`: ID of the card to retrieve
 
 **Headers:**
@@ -275,18 +379,49 @@ Get the current board state (numbers that have been extracted).
 **Response:**
 ```json
 {
+  "card_id": "card_abc123",
+  "card_data": [
+    [null, 15, null, 37, null, 52, null, 68, 89],
+    [4, null, 23, null, 41, null, 67, null, null],
+    [null, 19, null, 39, null, 58, null, 74, 90]
+  ],
+  "assigned_to": "A1B2C3D4E5F6G7H8"
+}
+```
+
+**Notes:**
+- Returns complete card data structure
+- Cards are specific to the game and client
+- Only the assigned client can view their own cards
+
+### 5. Board & Game State (Game-Specific)
+
+#### GET /{game_id}/board
+
+Get the current board state (extracted numbers) for a specific game.
+
+**Path Parameters:**
+- `game_id`: ID of the game (e.g., `game_12345678`)
+
+**Response:**
+```json
+{
   "numbers": [15, 23, 37, 41, 52, 68, 74, 89],
   "marked_numbers": [15, 23, 37, 41, 52, 68, 74, 89]
 }
 ```
 
 **Notes:**
-- Returns Board struct with numbers array (in extraction order) and marked_numbers set
-- Empty arrays if no numbers have been extracted yet
+- Returns Board struct with numbers array (in extraction order) and marked_numbers set for specific game
+- Empty arrays if no numbers have been extracted yet in this game
+- Board state is completely isolated per game
 
-#### GET /pouch
+#### GET /{game_id}/pouch
 
-Get the current pouch state (remaining numbers).
+Get the current pouch state (remaining numbers) for a specific game.
+
+**Path Parameters:**
+- `game_id`: ID of the game (e.g., `game_12345678`)
 
 **Response:**
 ```json
@@ -296,13 +431,17 @@ Get the current pouch state (remaining numbers).
 ```
 
 **Notes:**
-- Returns Pouch struct directly with numbers array
-- `numbers` contains all numbers that haven't been extracted yet
+- Returns Pouch struct directly with numbers array for specific game
+- `numbers` contains all numbers that haven't been extracted yet in this game
 - The count of remaining numbers can be obtained from the length of the numbers array
+- Pouch state is completely isolated per game
 
-#### GET /scoremap
+#### GET /{game_id}/scoremap
 
-Get the current scorecard and score map (prize tracking information).
+Get the current scorecard and score map (prize tracking information) for a specific game.
+
+**Path Parameters:**
+- `game_id`: ID of the game (e.g., `game_12345678`)
 
 **Response:**
 ```json
@@ -340,25 +479,28 @@ Get the current scorecard and score map (prize tracking information).
 ```
 
 **Notes:**
-- Returns ScoreCard struct with `published_score` and `score_map` fields
-- `published_score`: The highest score achieved so far (current published achievement level)
-- `score_map`: Map of score indices to arrays of ScoreAchievement objects
+- Returns ScoreCard struct with `published_score` and `score_map` fields for specific game
+- `published_score`: The highest score achieved so far in this game (current published achievement level)
+- `score_map`: Map of score indices to arrays of ScoreAchievement objects for this specific game
 - Each ScoreAchievement contains:
   - `client_id`: The ID of the client who achieved the score (or "0000000000000000" for board achievements)
   - `card_id`: The ID of the card that achieved the score (or "0000000000000000" for board achievements)
-  - `numbers`: Array of specific numbers that contributed to achieving that score level
-- Returns `published_score: 0` if no achievements have been recorded yet
+  - `numbers`: Array of specific numbers that contributed to achieving that score level in this game
+- Returns `published_score: 0` if no achievements have been recorded yet in this game
 - Each key in score_map represents a score level:
   - `2`, `3`, `4`, `5`: Number of numbers in a line achievement
   - `15`: BINGO (full card completion)
 - For line achievements, `numbers` contains only the numbers from the winning line
 - For BINGO achievements, `numbers` contains all 15 numbers that completed the card
-- Empty score_map `{}` if no scores have been recorded yet
-- To get client names from client IDs, use the `/clientbyid/{client_id}` endpoint
+- Empty score_map `{}` if no scores have been recorded yet in this game
+- Score data is completely isolated per game
 
-#### GET /status
+#### GET /{game_id}/status
 
-Get overall server status and game information.
+Get overall server status and specific game information.
+
+**Path Parameters:**
+- `game_id`: ID of the game (e.g., `game_12345678`)
 
 **Response:**
 ```json
@@ -373,15 +515,20 @@ Get overall server status and game information.
 ```
 
 **Notes:**
-- `game_id`: Unique 8-digit hexadecimal identifier for the current game instance
-- `created_at`: Human-readable timestamp when the current game was created/reset
-- `numbers_extracted`: Total count of numbers extracted so far
-- `scorecard`: Current published score (highest achievement level reached)
+- `game_id`: Unique 8-digit hexadecimal identifier for the specific game
+- `created_at`: Human-readable timestamp when this specific game was created
+- `numbers_extracted`: Total count of numbers extracted so far in this game
+- `scorecard`: Current published score (highest achievement level reached) in this game
 - `server`: Server implementation identifier
 
-#### POST /extract
+- `server`: Server implementation identifier
 
-Extract the next number from the pouch (remote extraction control).
+#### POST /{game_id}/extract
+
+Extract the next number from the pouch for a specific game (remote extraction control).
+
+**Path Parameters:**
+- `game_id`: ID of the game (e.g., `game_12345678`)
 
 **Authentication Required:** Yes (X-Client-ID header must be "0000000000000000")
 
@@ -389,8 +536,8 @@ Extract the next number from the pouch (remote extraction control).
 
 **Request:**
 ```bash
-curl -X POST http://127.0.0.1:3000/extract \
-  -H "X-Client-ID: 0000000000000000" \
+curl -X POST http://127.0.0.1:3000/game_12345678/extract
+  -H "X-Client-ID: 0000000000000000"
   -H "Content-Type: application/json"
 ```
 
@@ -401,7 +548,7 @@ curl -X POST http://127.0.0.1:3000/extract \
   "extracted_number": 42,
   "numbers_remaining": 82,
   "total_extracted": 8,
-  "message": "Number 42 extracted successfully"
+  "message": "Number 42 extracted successfully from game game_12345678"
 }
 ```
 
@@ -412,10 +559,17 @@ curl -X POST http://127.0.0.1:3000/extract \
 }
 ```
 
+**Error Response - Game Not Found (404 Not Found):**
+```json
+{
+  "error": "Game game_12345678 not found"
+}
+```
+
 **Error Response - Pouch Empty (409 Conflict):**
 ```json
 {
-  "error": "No numbers remaining in pouch"
+  "error": "No numbers remaining in pouch for game game_12345678"
 }
 ```
 
@@ -427,13 +581,13 @@ curl -X POST http://127.0.0.1:3000/extract \
 ```
 
 **Notes:**
-- Performs the same extraction logic as manual `next_extraction` in the terminal UI
+- Performs extraction logic for the specific game only
 - **Security**: Only the special board client (ID: "0000000000000000") is authorized to extract numbers
 - Regular game clients cannot trigger extractions for security and game integrity
-- Automatically updates the board state, scorecard, and marked numbers
-- Follows the coordinated mutex locking pattern to ensure thread safety
-- Returns detailed information about the extraction result
-- `numbers_remaining`: Count of numbers still available in the pouch
+- Automatically updates the board state, scorecard, and marked numbers for the specific game
+- Follows the coordinated mutex locking pattern to ensure thread safety per game
+- Returns detailed information about the extraction result for the specific game
+- `numbers_remaining`: Count of numbers still available in the pouch for this game
 - `total_extracted`: Total numbers extracted so far (including this one)
 - Server logs the extraction with client identification for audit purposes
 
@@ -603,61 +757,84 @@ Tombola cards follow specific rules:
 
 ## Example Usage
 
-### Complete Client Workflow
+### Complete Multi-Game Client Workflow
 
-**Important**: Client registration must be completed before any numbers are extracted from the pouch.
+**Important**: Client registration must be completed before any numbers are extracted from the pouch in each specific game.
 
-1. **Register a client with default card (1 card):**
+1. **Discover available games:**
 ```bash
-curl -X POST http://127.0.0.1:3000/register \
+curl http://127.0.0.1:3000/gameslist
+```
+
+2. **Create a new game (board client only):**
+```bash
+curl -X POST http://127.0.0.1:3000/newgame \
+  -H "X-Client-ID: 0000000000000000" \
+  -H "Content-Type: application/json"
+```
+
+3. **Register a client to a specific game with default card (1 card):**
+```bash
+curl -X POST http://127.0.0.1:3000/game_12345678/register \
   -H "Content-Type: application/json" \
   -d '{"name": "player1", "client_type": "player"}'
 ```
 
-2. **Register a client with specific number of cards:**
+4. **Register a client to a specific game with multiple cards:**
 ```bash
-curl -X POST http://127.0.0.1:3000/register \
+curl -X POST http://127.0.0.1:3000/game_12345678/register \
   -H "Content-Type: application/json" \
   -d '{"name": "player2", "client_type": "player", "nocard": 6}'
 ```
 
-**Note**: After the first number is extracted via `/extract`, registration will fail:
+**Note**: After the first number is extracted via `/{game_id}/extract`, registration will fail for that specific game:
 ```bash
-# This will return 409 Conflict if numbers have been extracted
-curl -X POST http://127.0.0.1:3000/register \
+# This will return 409 Conflict if numbers have been extracted in game_12345678
+curl -X POST http://127.0.0.1:3000/game_12345678/register \
   -H "Content-Type: application/json" \
   -d '{"name": "lateplayer", "client_type": "player"}'
 ```
 
-3. **Get client information by name:**
+5. **Get client information by name (global search):**
 ```bash
 curl "http://127.0.0.1:3000/clientinfo?name=player1"
 ```
 
-3a. **Get client information by ID:**
+6. **Get client information by ID (global search):**
 ```bash
 curl http://127.0.0.1:3000/clientinfo/A1B2C3D4E5F6G7H8
 ```
 
-4. **List assigned cards:**
+7. **List assigned cards in specific game:**
 ```bash
-curl http://127.0.0.1:3000/listassignedcards \
+curl http://127.0.0.1:3000/game_12345678/listassignedcards \
   -H "X-Client-ID: A1B2C3D4E5F6G7H8"
 ```
 
-5. **Get specific card:**
+8. **Get specific card in specific game:**
 ```bash
-curl http://127.0.0.1:3000/getassignedcard/card_id_1 \
+curl http://127.0.0.1:3000/game_12345678/getassignedcard/card_id_1 \
   -H "X-Client-ID: A1B2C3D4E5F6G7H8"
 ```
 
-5. **Check game state:**
+9. **Check game state for specific game:**
 ```bash
-curl http://127.0.0.1:3000/status
-curl http://127.0.0.1:3000/runninggameid
-curl http://127.0.0.1:3000/board
-curl http://127.0.0.1:3000/pouch
-curl http://127.0.0.1:3000/scoremap
+curl http://127.0.0.1:3000/game_12345678/status
+curl http://127.0.0.1:3000/game_12345678/board
+curl http://127.0.0.1:3000/game_12345678/pouch
+curl http://127.0.0.1:3000/game_12345678/scoremap
+```
+
+10. **Extract numbers in specific game (board client only):**
+```bash
+curl -X POST http://127.0.0.1:3000/game_12345678/extract \
+  -H "X-Client-ID: 0000000000000000"
+```
+
+11. **Dump specific game state:**
+```bash
+curl -X POST http://127.0.0.1:3000/game_12345678/dumpgame \
+  -H "X-Client-ID: 0000000000000000"
 ```
 
 ## Rate Limiting
@@ -667,10 +844,9 @@ Currently, no rate limiting is implemented. The server uses a connection timeout
 ## Concurrency
 
 The server supports concurrent connections and uses Arc<Mutex<>> for thread-safe access to shared state:
-- Board state
-- Pouch state
-- Client registry
-- Card assignments
+- **GameRegistry**: Thread-safe access to multiple games
+- **Per-Game State**: Board state, Pouch state, Client registry, Card assignments (all per game)
+- **Game Isolation**: Complete separation of game state between different games
 
 ## Server Configuration
 

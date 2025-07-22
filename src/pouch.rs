@@ -2,7 +2,7 @@ use crate::defs::{Number, FIRSTNUMBER, LASTNUMBER};
 use serde::{Deserialize, Serialize};
 use rand::{rng, Rng};
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Pouch {
     pub numbers: Vec<Number>,
 }

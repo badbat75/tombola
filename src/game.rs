@@ -8,6 +8,7 @@
 
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
+use std::collections::HashMap;
 use rand::Rng;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -19,10 +20,307 @@ use crate::card::CardAssignmentManager;
 use crate::defs::Number;
 use crate::extraction::perform_extraction;
 
+/// Represents the current status of a game
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum GameStatus {
+    /// New game with no numbers extracted yet
+    New,
+    /// Active game with at least one number extracted
+    Active,
+    /// Closed game where BINGO has been reached
+    Closed,
+}
+
+impl GameStatus {
+    /// Convert GameStatus to a string representation
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            GameStatus::New => "New",
+            GameStatus::Active => "Active",
+            GameStatus::Closed => "Closed",
+        }
+    }
+}
+
+/// Represents a game entry in the registry
+#[derive(Debug, Clone)]
+pub struct GameEntry {
+    /// The game ID
+    pub game_id: String,
+    /// Reference to the actual game instance
+    pub game: Arc<Game>,
+    /// When this game was registered
+    pub registered_at: SystemTime,
+    /// When this game was closed (if applicable)
+    pub closed_at: Option<SystemTime>,
+}
+
+impl GameEntry {
+    /// Create a new game entry
+    pub fn new(game_id: String, game: Arc<Game>) -> Self {
+        Self {
+            game_id,
+            game,
+            registered_at: SystemTime::now(),
+            closed_at: None,
+        }
+    }
+
+    /// Get the current status of this game
+    pub fn status(&self) -> GameStatus {
+        if self.game.is_bingo_reached() {
+            GameStatus::Closed
+        } else if self.game.has_game_started() {
+            GameStatus::Active
+        } else {
+            GameStatus::New
+        }
+    }
+
+    /// Update the closed_at timestamp if the game is closed
+    /// This should be called when checking status to ensure closed_at is properly set
+    pub fn update_closed_at(&mut self) {
+        if self.game.is_bingo_reached() && self.closed_at.is_none() {
+            self.closed_at = Some(SystemTime::now());
+        }
+    }
+
+    /// Get the status and update closed_at if necessary
+    /// This is a convenience method that combines status checking with closed_at updating
+    pub fn status_with_update(&mut self) -> GameStatus {
+        let status = self.status();
+        if status == GameStatus::Closed && self.closed_at.is_none() {
+            self.closed_at = Some(SystemTime::now());
+        }
+        status
+    }
+
+    /// Check if the game is closed
+    pub fn is_closed(&self) -> bool {
+        self.game.is_bingo_reached()
+    }
+
+    /// Get the closed_at time as a human-readable string
+    pub fn closed_at_string(&self) -> Option<String> {
+        self.closed_at.map(|closed_at| {
+            match closed_at.duration_since(std::time::UNIX_EPOCH) {
+                Ok(duration) => {
+                    let datetime: DateTime<Utc> = DateTime::from_timestamp(duration.as_secs() as i64, 0)
+                        .unwrap_or_else(Utc::now);
+                    datetime.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+                }
+                Err(_) => "Unknown time".to_string(),
+            }
+        })
+    }
+
+    /// Get game info as a formatted string
+    pub fn info(&self) -> String {
+        let closed_info = match self.closed_at_string() {
+            Some(closed_time) => format!(", closed_at={closed_time}"),
+            None => String::new(),
+        };
+
+        format!(
+            "GameEntry[id={}, status={}, board_len={}, score={}, registered_at={}{}]",
+            self.game_id,
+            self.status().as_str(),
+            self.game.board_length(),
+            self.game.published_score(),
+            self.registered_at_string(),
+            closed_info
+        )
+    }
+
+    /// Get a human-readable registration time string
+    pub fn registered_at_string(&self) -> String {
+        match self.registered_at.duration_since(std::time::UNIX_EPOCH) {
+            Ok(duration) => {
+                let datetime: DateTime<Utc> = DateTime::from_timestamp(duration.as_secs() as i64, 0)
+                    .unwrap_or_else(Utc::now);
+                datetime.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+            }
+            Err(_) => "Unknown time".to_string(),
+        }
+    }
+}
+
+/// Registry for managing multiple games
+/// This allows the server to track multiple concurrent or historical games
+///
+/// # Example
+/// ```
+/// use std::sync::Arc;
+/// use tombola::game::{Game, GameRegistry, GameStatus};
+///
+/// // Create a new registry
+/// let registry = GameRegistry::new();
+///
+/// // Create and add games
+/// let game1 = Arc::new(Game::new());
+/// let game2 = Arc::new(Game::new());
+///
+/// let game1_id = registry.add_game(game1.clone()).unwrap();
+/// let game2_id = registry.add_game(game2.clone()).unwrap();
+///
+/// // List all games
+/// let games = registry.games_list().unwrap();
+/// for (id, status, info) in games {
+///     println!("Game {}: {} - {}", id, status.as_str(), info);
+/// }
+///
+/// // Get games by status
+/// let new_games = registry.games_by_status(GameStatus::New).unwrap();
+/// println!("New games: {:?}", new_games);
+///
+/// // Get status summary
+/// let (new_count, active_count, closed_count) = registry.status_summary().unwrap();
+/// println!("Status: {} new, {} active, {} closed", new_count, active_count, closed_count);
+/// ```
+#[derive(Debug)]
+pub struct GameRegistry {
+    /// HashMap storing game entries by game ID
+    games: Arc<Mutex<HashMap<String, GameEntry>>>,
+}
+
+impl GameRegistry {
+    /// Create a new empty game registry
+    pub fn new() -> Self {
+        Self {
+            games: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Add a new game to the registry
+    /// Returns the game ID if successful, or an error message
+    pub fn add_game(&self, game: Arc<Game>) -> Result<String, String> {
+        let game_id = game.id();
+
+        let mut games_lock = self.games.lock()
+            .map_err(|_| "Failed to lock games registry")?;
+
+        // Check if game ID already exists
+        if games_lock.contains_key(&game_id) {
+            return Err(format!("Game with ID '{game_id}' already exists in registry"));
+        }
+
+        let entry = GameEntry::new(game_id.clone(), game);
+        games_lock.insert(game_id.clone(), entry);
+
+        Ok(game_id)
+    }
+
+    /// Get a list of all registered games with their status
+    /// Returns a vector of tuples: (game_id, status, game_info)
+    pub fn games_list(&self) -> Result<Vec<(String, GameStatus, String)>, String> {
+        let mut games_lock = self.games.lock()
+            .map_err(|_| "Failed to lock games registry")?;
+
+        let mut games_info = Vec::new();
+
+        for (game_id, entry) in games_lock.iter_mut() {
+            let status = entry.status_with_update(); // This will update closed_at if necessary
+            let info = entry.info();
+            games_info.push((game_id.clone(), status, info));
+        }
+
+        // Sort by game ID for consistent ordering
+        games_info.sort_by(|a, b| a.0.cmp(&b.0));
+
+        Ok(games_info)
+    }
+
+    /// Get a specific game by ID
+    pub fn get_game(&self, game_id: &str) -> Result<Option<Arc<Game>>, String> {
+        let games_lock = self.games.lock()
+            .map_err(|_| "Failed to lock games registry")?;
+
+        Ok(games_lock.get(game_id).map(|entry| entry.game.clone()))
+    }
+
+    /// Remove a game from the registry
+    /// Returns true if the game was removed, false if it didn't exist
+    pub fn remove_game(&self, game_id: &str) -> Result<bool, String> {
+        let mut games_lock = self.games.lock()
+            .map_err(|_| "Failed to lock games registry")?;
+
+        Ok(games_lock.remove(game_id).is_some())
+    }
+
+    /// Get the total number of registered games
+    pub fn total_games(&self) -> Result<usize, String> {
+        let games_lock = self.games.lock()
+            .map_err(|_| "Failed to lock games registry")?;
+
+        Ok(games_lock.len())
+    }
+
+    /// Get games by status
+    pub fn games_by_status(&self, status: GameStatus) -> Result<Vec<String>, String> {
+        let mut games_lock = self.games.lock()
+            .map_err(|_| "Failed to lock games registry")?;
+
+        let mut matching_games = Vec::new();
+
+        for (game_id, entry) in games_lock.iter_mut() {
+            if entry.status_with_update() == status { // This will update closed_at if necessary
+                matching_games.push(game_id.clone());
+            }
+        }
+
+        matching_games.sort();
+        Ok(matching_games)
+    }
+
+    /// Get a summary of games by status
+    pub fn status_summary(&self) -> Result<(usize, usize, usize), String> {
+        let mut games_lock = self.games.lock()
+            .map_err(|_| "Failed to lock games registry")?;
+
+        let mut new_count = 0;
+        let mut active_count = 0;
+        let mut closed_count = 0;
+
+        for entry in games_lock.values_mut() {
+            match entry.status_with_update() { // This will update closed_at if necessary
+                GameStatus::New => new_count += 1,
+                GameStatus::Active => active_count += 1,
+                GameStatus::Closed => closed_count += 1,
+            }
+        }
+
+        Ok((new_count, active_count, closed_count))
+    }
+
+    /// Clear all games from the registry
+    pub fn clear(&self) -> Result<usize, String> {
+        let mut games_lock = self.games.lock()
+            .map_err(|_| "Failed to lock games registry")?;
+
+        let count = games_lock.len();
+        games_lock.clear();
+        Ok(count)
+    }
+}
+
+impl Default for GameRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Clone for GameRegistry {
+    fn clone(&self) -> Self {
+        Self {
+            games: self.games.clone(),
+        }
+    }
+}
+
 /// Game struct that holds all shared game state components
 /// This provides a single point of access for all game operations
 /// and ensures proper mutex coordination to prevent deadlocks.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Game {
     id: Arc<Mutex<String>>,
     created_at: Arc<Mutex<SystemTime>>,
@@ -97,95 +395,6 @@ impl Game {
     /// Get a reference to the card manager Arc<Mutex<CardAssignmentManager>>
     pub fn card_manager(&self) -> &Arc<Mutex<CardAssignmentManager>> {
         &self.card_manager
-    }
-
-    /// Completely reset all game state and destroy all persistent data to start a fresh game
-    /// This is a COMPLETE RESET that forces all clients to re-register and get new cards
-    /// All client sessions, card assignments, and game progress will be lost
-    pub fn reset_game(&self) -> Result<Vec<String>, Vec<String>> {
-        let mut reset_components = Vec::new();
-        let mut errors = Vec::new();
-
-        // Generate completely new game identity
-        let mut rng = rand::rng();
-        let new_id = format!("game_{:08x}", rng.random::<u32>());
-        let new_creation_time = SystemTime::now();
-
-        // Create COMPLETELY FRESH instances of all components
-        // This ensures no data persistence from previous games
-        let fresh_board = Board::new();
-        let fresh_pouch = Pouch::new();
-        let fresh_scorecard = ScoreCard::new();
-        let fresh_client_registry = ClientRegistry::new();  // All clients must re-register
-        let fresh_card_manager = CardAssignmentManager::new();  // All card assignments lost
-
-        // ATOMIC REPLACEMENT: Replace all components atomically by acquiring all locks
-        // This follows strict mutex acquisition order to prevent deadlocks:
-        // id -> created_at -> pouch -> board -> scorecard -> card_manager -> client_registry
-
-        // Replace game ID (forces new game identity)
-        if let Ok(mut id_lock) = self.id.lock() {
-            *id_lock = new_id.clone();
-            reset_components.push(format!("New game ID generated: {new_id}"));
-        } else {
-            errors.push("Failed to lock game ID for complete reset".to_string());
-        }
-
-        // Replace creation time (new game timestamp)
-        if let Ok(mut created_at_lock) = self.created_at.lock() {
-            *created_at_lock = new_creation_time;
-            reset_components.push("Game creation time reset".to_string());
-        } else {
-            errors.push("Failed to lock creation time for complete reset".to_string());
-        }
-
-        // Replace pouch (fresh number pool)
-        if let Ok(mut pouch_lock) = self.pouch.lock() {
-            *pouch_lock = fresh_pouch;
-            reset_components.push("Pouch completely recreated with fresh numbers 1-90".to_string());
-        } else {
-            errors.push("Failed to lock pouch for complete reset".to_string());
-        }
-
-        // Replace board (clean slate)
-        if let Ok(mut board_lock) = self.board.lock() {
-            *board_lock = fresh_board;
-            reset_components.push("Board completely recreated - clean slate".to_string());
-        } else {
-            errors.push("Failed to lock board for complete reset".to_string());
-        }
-
-        // Replace scorecard (reset all scoring)
-        if let Ok(mut scorecard_lock) = self.scorecard.lock() {
-            *scorecard_lock = fresh_scorecard;
-            reset_components.push("Score card completely recreated - all scores lost".to_string());
-        } else {
-            errors.push("Failed to lock scorecard for complete reset".to_string());
-        }
-
-        // Replace card manager (ALL CARD ASSIGNMENTS DESTROYED)
-        if let Ok(mut card_mgr_lock) = self.card_manager.lock() {
-            *card_mgr_lock = fresh_card_manager;
-            reset_components.push("Card assignment manager destroyed - all card assignments lost".to_string());
-        } else {
-            errors.push("Failed to lock card manager for complete reset".to_string());
-        }
-
-        // Replace client registry (ALL CLIENT SESSIONS DESTROYED)
-        if let Ok(mut registry_lock) = self.client_registry.lock() {
-            *registry_lock = fresh_client_registry;
-            reset_components.push("Client registry destroyed - all clients must re-register".to_string());
-        } else {
-            errors.push("Failed to lock client registry for complete reset".to_string());
-        }
-
-        if errors.is_empty() {
-            reset_components.push("COMPLETE GAME RESET: All persistent data destroyed".to_string());
-            reset_components.push("All clients must re-register and get new card assignments".to_string());
-            Ok(reset_components)
-        } else {
-            Err(errors)
-        }
     }
 
     /// Perform a number extraction using the coordinated extraction logic
@@ -417,147 +626,6 @@ mod tests {
     }
 
     #[test]
-    fn test_game_reset() {
-        let game = Game::new();
-        let original_id = game.id();
-
-        // Test that reset works properly and generates new game ID
-        let result = game.reset_game();
-        assert!(result.is_ok());
-
-        let reset_components = result.unwrap();
-        assert!(reset_components.contains(&"Pouch completely recreated with fresh numbers 1-90".to_string()));
-        assert!(reset_components.contains(&"Board completely recreated - clean slate".to_string()));
-        assert!(reset_components.contains(&"Score card completely recreated - all scores lost".to_string()));
-        assert!(reset_components.contains(&"Card assignment manager destroyed - all card assignments lost".to_string()));
-        assert!(reset_components.contains(&"Client registry destroyed - all clients must re-register".to_string()));
-        assert!(reset_components.contains(&"COMPLETE GAME RESET: All persistent data destroyed".to_string()));
-
-        // Verify that a new game ID was generated
-        assert_ne!(game.id(), original_id);
-        assert!(game.id().starts_with("game_"));
-        assert!(reset_components.iter().any(|s| s.starts_with("New game ID generated:")));
-    }
-
-    #[test]
-    fn test_complete_data_destruction_on_reset() {
-        let game = Game::new();
-        let original_id = game.id();
-
-        // Simulate a game with client registrations and card assignments
-        // This test ensures ALL persistent data is destroyed on reset
-
-        // Step 1: Add some clients to the registry
-        {
-            let mut client_registry = game.client_registry.lock().unwrap();
-            use crate::client::ClientInfo;
-
-            let client1 = ClientInfo::new("TestPlayer1", "player");
-            let client2 = ClientInfo::new("TestPlayer2", "player");
-
-            // Insert clients (simulate registration)
-            client_registry.insert("TestPlayer1".to_string(), client1, false).unwrap();
-            client_registry.insert("TestPlayer2".to_string(), client2, false).unwrap();
-
-            // Verify clients are registered
-            assert_eq!(client_registry.len(), 2);
-            assert!(client_registry.get("TestPlayer1").is_some());
-            assert!(client_registry.get("TestPlayer2").is_some());
-        }
-
-        // Step 2: Add some card assignments
-        {
-            let mut card_manager = game.card_manager.lock().unwrap();
-
-            // Simulate card assignment to client
-            let (card_infos, _card_ids) = card_manager.assign_cards("test_client_123", 2);
-
-            // Verify cards are assigned
-            assert_eq!(card_infos.len(), 2);
-            assert!(!card_manager.get_all_assignments().is_empty());
-            assert!(card_manager.get_client_cards("test_client_123").is_some());
-        }
-
-        // Step 3: Simulate some game progress (extract numbers)
-        {
-            let mut board = game.board.lock().unwrap();
-            let mut pouch = game.pouch.lock().unwrap();
-            let mut scorecard = game.scorecard.lock().unwrap();
-
-            // Simulate extracting some numbers
-            let extracted_number = pouch.extract();
-            board.push_simple(extracted_number);
-            scorecard.update_scorecard(5); // Simulate some score
-
-            // Verify game has progressed
-            assert_eq!(board.len(), 1);
-            assert_eq!(pouch.len(), 89); // One number extracted
-            assert_eq!(scorecard.published_score, 5);
-        }
-
-        // Step 4: Perform complete reset
-        let reset_result = game.reset_game();
-        assert!(reset_result.is_ok());
-
-        // Step 5: Verify COMPLETE destruction of all data
-
-        // Verify new game ID
-        assert_ne!(game.id(), original_id);
-        assert!(game.id().starts_with("game_"));
-
-        // Verify client registry is completely empty
-        {
-            let client_registry = game.client_registry.lock().unwrap();
-            assert_eq!(client_registry.len(), 0);
-            assert!(client_registry.is_empty());
-            assert!(client_registry.get("TestPlayer1").is_none());
-            assert!(client_registry.get("TestPlayer2").is_none());
-        }
-
-        // Verify card assignments are completely destroyed
-        {
-            let card_manager = game.card_manager.lock().unwrap();
-            assert!(card_manager.get_all_assignments().is_empty());
-            assert!(card_manager.get_client_cards("test_client_123").is_none());
-        }
-
-        // Verify board is completely fresh
-        {
-            let board = game.board.lock().unwrap();
-            assert_eq!(board.len(), 0);
-            assert!(board.is_empty());
-        }
-
-        // Verify pouch is completely refilled
-        {
-            let pouch = game.pouch.lock().unwrap();
-            assert_eq!(pouch.len(), 90); // Back to full
-        }
-
-        // Verify scorecard is completely reset
-        {
-            let scorecard = game.scorecard.lock().unwrap();
-            assert_eq!(scorecard.published_score, 0);
-        }
-
-        // Verify game state methods reflect complete reset
-        assert!(!game.has_game_started());
-        assert_eq!(game.board_length(), 0);
-        assert_eq!(game.published_score(), 0);
-        assert_eq!(game.pouch_length(), 90);
-        assert!(!game.is_bingo_reached());
-        assert!(!game.is_pouch_empty());
-        assert!(!game.is_game_ended());
-
-        // Verify this is truly a fresh game that requires complete re-registration
-        let reset_messages = reset_result.unwrap();
-        assert!(reset_messages.contains(&"Client registry destroyed - all clients must re-register".to_string()));
-        assert!(reset_messages.contains(&"Card assignment manager destroyed - all card assignments lost".to_string()));
-        assert!(reset_messages.contains(&"COMPLETE GAME RESET: All persistent data destroyed".to_string()));
-        assert!(reset_messages.contains(&"All clients must re-register and get new card assignments".to_string()));
-    }
-
-    #[test]
     fn test_game_state_queries() {
         let game = Game::new();
 
@@ -674,5 +742,527 @@ mod tests {
         let now = SystemTime::now();
         let time_diff = now.duration_since(created_at_systemtime).unwrap_or_default();
         assert!(time_diff.as_secs() < 5); // Should be created within last 5 seconds
+    }
+
+    #[test]
+    fn test_game_registry_creation() {
+        let registry = GameRegistry::new();
+
+        // Test initial state
+        assert_eq!(registry.total_games().unwrap(), 0);
+
+        let games_list = registry.games_list().unwrap();
+        assert!(games_list.is_empty());
+
+        let status_summary = registry.status_summary().unwrap();
+        assert_eq!(status_summary, (0, 0, 0)); // (new, active, closed)
+    }
+
+    #[test]
+    fn test_game_registry_add_game() {
+        let registry = GameRegistry::new();
+        let game1 = Arc::new(Game::new());
+        let game2 = Arc::new(Game::new());
+
+        // Add first game
+        let game1_id = registry.add_game(game1.clone()).unwrap();
+        assert_eq!(game1_id, game1.id());
+        assert_eq!(registry.total_games().unwrap(), 1);
+
+        // Add second game
+        let game2_id = registry.add_game(game2.clone()).unwrap();
+        assert_eq!(game2_id, game2.id());
+        assert_eq!(registry.total_games().unwrap(), 2);
+
+        // Try to add the same game again (should fail)
+        let duplicate_result = registry.add_game(game1.clone());
+        assert!(duplicate_result.is_err());
+        assert!(duplicate_result.unwrap_err().contains("already exists"));
+        assert_eq!(registry.total_games().unwrap(), 2); // Count shouldn't change
+    }
+
+    #[test]
+    fn test_game_registry_games_list() {
+        let registry = GameRegistry::new();
+        let game1 = Arc::new(Game::new());
+        let game2 = Arc::new(Game::new());
+
+        // Add games
+        registry.add_game(game1.clone()).unwrap();
+        registry.add_game(game2.clone()).unwrap();
+
+        // Get games list
+        let games_list = registry.games_list().unwrap();
+        assert_eq!(games_list.len(), 2);
+
+        // Check that both games are present with New status
+        let game_ids: Vec<String> = games_list.iter().map(|(id, _, _)| id.clone()).collect();
+        assert!(game_ids.contains(&game1.id()));
+        assert!(game_ids.contains(&game2.id()));
+
+        // All games should have New status initially
+        for (_, status, _) in &games_list {
+            assert_eq!(*status, GameStatus::New);
+        }
+    }
+
+    #[test]
+    fn test_game_registry_get_game() {
+        let registry = GameRegistry::new();
+        let game = Arc::new(Game::new());
+        let game_id = game.id();
+
+        // Get non-existent game
+        let result = registry.get_game("non_existent_id").unwrap();
+        assert!(result.is_none());
+
+        // Add game and retrieve it
+        registry.add_game(game.clone()).unwrap();
+        let retrieved_game = registry.get_game(&game_id).unwrap();
+        assert!(retrieved_game.is_some());
+
+        let retrieved = retrieved_game.unwrap();
+        assert_eq!(retrieved.id(), game_id);
+    }
+
+    #[test]
+    fn test_game_registry_remove_game() {
+        let registry = GameRegistry::new();
+        let game = Arc::new(Game::new());
+        let game_id = game.id();
+
+        // Try to remove non-existent game
+        let removed = registry.remove_game("non_existent_id").unwrap();
+        assert!(!removed);
+
+        // Add game and remove it
+        registry.add_game(game.clone()).unwrap();
+        assert_eq!(registry.total_games().unwrap(), 1);
+
+        let removed = registry.remove_game(&game_id).unwrap();
+        assert!(removed);
+        assert_eq!(registry.total_games().unwrap(), 0);
+
+        // Try to remove again (should return false)
+        let removed_again = registry.remove_game(&game_id).unwrap();
+        assert!(!removed_again);
+    }
+
+    #[test]
+    fn test_game_registry_games_by_status() {
+        let registry = GameRegistry::new();
+        let game1 = Arc::new(Game::new());
+        let game2 = Arc::new(Game::new());
+
+        registry.add_game(game1.clone()).unwrap();
+        registry.add_game(game2.clone()).unwrap();
+
+        // Initially all games should be New
+        let new_games = registry.games_by_status(GameStatus::New).unwrap();
+        assert_eq!(new_games.len(), 2);
+        assert!(new_games.contains(&game1.id()));
+        assert!(new_games.contains(&game2.id()));
+
+        let active_games = registry.games_by_status(GameStatus::Active).unwrap();
+        assert!(active_games.is_empty());
+
+        let closed_games = registry.games_by_status(GameStatus::Closed).unwrap();
+        assert!(closed_games.is_empty());
+    }
+
+    #[test]
+    fn test_game_registry_status_summary() {
+        let registry = GameRegistry::new();
+        let game1 = Arc::new(Game::new());
+        let game2 = Arc::new(Game::new());
+
+        // Empty registry
+        let summary = registry.status_summary().unwrap();
+        assert_eq!(summary, (0, 0, 0));
+
+        // Add games
+        registry.add_game(game1.clone()).unwrap();
+        registry.add_game(game2.clone()).unwrap();
+
+        // All should be New
+        let summary = registry.status_summary().unwrap();
+        assert_eq!(summary, (2, 0, 0)); // (new, active, closed)
+    }
+
+    #[test]
+    fn test_game_registry_clear() {
+        let registry = GameRegistry::new();
+        let game1 = Arc::new(Game::new());
+        let game2 = Arc::new(Game::new());
+
+        registry.add_game(game1.clone()).unwrap();
+        registry.add_game(game2.clone()).unwrap();
+        assert_eq!(registry.total_games().unwrap(), 2);
+
+        // Clear all games
+        let cleared_count = registry.clear().unwrap();
+        assert_eq!(cleared_count, 2);
+        assert_eq!(registry.total_games().unwrap(), 0);
+
+        // Clear empty registry
+        let cleared_count_empty = registry.clear().unwrap();
+        assert_eq!(cleared_count_empty, 0);
+    }
+
+    #[test]
+    fn test_game_entry() {
+        let game = Arc::new(Game::new());
+        let game_id = game.id();
+        let mut entry = GameEntry::new(game_id.clone(), game.clone());
+
+        // Test initial values
+        assert_eq!(entry.game_id, game_id);
+        assert_eq!(entry.game.id(), game_id);
+        assert_eq!(entry.status(), GameStatus::New);
+        assert!(entry.closed_at.is_none());
+        assert!(!entry.is_closed());
+
+        // Test info string
+        let info = entry.info();
+        assert!(info.contains(&game_id));
+        assert!(info.contains("New"));
+        assert!(info.contains("board_len=0"));
+        assert!(info.contains("score=0"));
+        assert!(!info.contains("closed_at=")); // Should not have closed_at info for new game
+
+        // Test registered_at_string
+        let reg_time = entry.registered_at_string();
+        assert!(reg_time.contains("UTC"));
+        assert!(!reg_time.is_empty());
+
+        // Test closed_at_string when None
+        assert!(entry.closed_at_string().is_none());
+
+        // Test status_with_update for a new game
+        let status = entry.status_with_update();
+        assert_eq!(status, GameStatus::New);
+        assert!(entry.closed_at.is_none()); // Should still be None for non-closed game
+    }
+
+    #[test]
+    fn test_game_status_conversions() {
+        assert_eq!(GameStatus::New.as_str(), "New");
+        assert_eq!(GameStatus::Active.as_str(), "Active");
+        assert_eq!(GameStatus::Closed.as_str(), "Closed");
+
+        // Test PartialEq
+        assert_eq!(GameStatus::New, GameStatus::New);
+        assert_ne!(GameStatus::New, GameStatus::Active);
+        assert_ne!(GameStatus::Active, GameStatus::Closed);
+    }
+
+    #[test]
+    fn test_game_entry_closed_at() {
+        let game = Arc::new(Game::new());
+        let game_id = game.id();
+        let mut entry = GameEntry::new(game_id.clone(), game.clone());
+
+        // Initially closed_at should be None
+        assert!(entry.closed_at.is_none());
+        assert!(entry.closed_at_string().is_none());
+        assert!(!entry.is_closed());
+
+        // Simulate game reaching BINGO by manually setting the scorecard
+        {
+            let mut scorecard = game.scorecard().lock().unwrap();
+            scorecard.published_score = 15; // BINGO reached
+        }
+
+        // Now the game should be closed
+        assert!(entry.is_closed());
+        assert_eq!(entry.status(), GameStatus::Closed);
+
+        // But closed_at should still be None until we call status_with_update
+        assert!(entry.closed_at.is_none());
+
+        // Call status_with_update to set the closed_at timestamp
+        let status = entry.status_with_update();
+        assert_eq!(status, GameStatus::Closed);
+        assert!(entry.closed_at.is_some());
+
+        // Test that closed_at_string returns a valid time string
+        let closed_time_str = entry.closed_at_string();
+        assert!(closed_time_str.is_some());
+        let time_str = closed_time_str.unwrap();
+        assert!(time_str.contains("UTC"));
+        assert!(!time_str.is_empty());
+
+        // Test that info now includes closed_at
+        let info = entry.info();
+        assert!(info.contains("Closed"));
+        assert!(info.contains("closed_at="));
+
+        // Test that update_closed_at doesn't change the timestamp once set
+        let original_closed_at = entry.closed_at;
+        entry.update_closed_at();
+        assert_eq!(entry.closed_at, original_closed_at);
+    }
+
+    #[test]
+    fn test_game_registry_clone() {
+        let registry1 = GameRegistry::new();
+        let game = Arc::new(Game::new());
+
+        registry1.add_game(game.clone()).unwrap();
+        assert_eq!(registry1.total_games().unwrap(), 1);
+
+        // Clone the registry
+        let registry2 = registry1.clone();
+
+        // Both registries should reference the same data
+        assert_eq!(registry2.total_games().unwrap(), 1);
+
+        // Adding to one should affect the other (shared data)
+        let new_game = Arc::new(Game::new());
+        registry2.add_game(new_game.clone()).unwrap();
+
+        assert_eq!(registry1.total_games().unwrap(), 2);
+        assert_eq!(registry2.total_games().unwrap(), 2);
+    }
+
+    #[test]
+    fn test_game_lifecycle_end_to_end() {
+        // ========================================================================
+        // PHASE 1: Create a new game and register it
+        // ========================================================================
+
+        let registry = GameRegistry::new();
+        let game = Arc::new(Game::new());
+        let game_id = game.id();
+
+        // Verify initial game state
+        assert!(!game.has_game_started());
+        assert!(!game.is_bingo_reached());
+        assert!(!game.is_game_ended());
+        assert_eq!(game.board_length(), 0);
+        assert_eq!(game.published_score(), 0);
+        assert_eq!(game.pouch_length(), 90);
+
+        // Add game to registry
+        let registered_id = registry.add_game(game.clone()).unwrap();
+        assert_eq!(registered_id, game_id);
+
+        // ========================================================================
+        // PHASE 2: Verify initial registry state and game entry
+        // ========================================================================
+
+        // Check registry statistics
+        assert_eq!(registry.total_games().unwrap(), 1);
+        let (new_count, active_count, closed_count) = registry.status_summary().unwrap();
+        assert_eq!((new_count, active_count, closed_count), (1, 0, 0));
+
+        // Check games list
+        let games_list = registry.games_list().unwrap();
+        assert_eq!(games_list.len(), 1);
+        let (list_game_id, status, info) = &games_list[0];
+        assert_eq!(*list_game_id, game_id);
+        assert_eq!(*status, GameStatus::New);
+        assert!(info.contains("New"));
+        assert!(info.contains("board_len=0"));
+        assert!(info.contains("score=0"));
+        assert!(!info.contains("closed_at=")); // No closed_at for new game
+
+        // Check games by status
+        let new_games = registry.games_by_status(GameStatus::New).unwrap();
+        assert_eq!(new_games.len(), 1);
+        assert!(new_games.contains(&game_id));
+
+        let active_games = registry.games_by_status(GameStatus::Active).unwrap();
+        assert!(active_games.is_empty());
+
+        let closed_games = registry.games_by_status(GameStatus::Closed).unwrap();
+        assert!(closed_games.is_empty());
+
+        // ========================================================================
+        // PHASE 3: Extract some numbers to make the game active
+        // ========================================================================
+
+        println!("Extracting numbers to activate the game...");
+
+        // Extract 5 numbers to get the game started and build some score
+        for i in 1..=5 {
+            let current_score = game.published_score();
+            let extraction_result = game.extract_number(current_score);
+            assert!(extraction_result.is_ok(), "Failed to extract number {i}: {extraction_result:?}");
+
+            let (extracted_number, new_score) = extraction_result.unwrap();
+            println!("Extracted number: {extracted_number}, score: {current_score} -> {new_score}");
+
+            // Verify game state is progressing
+            assert!((1..=90).contains(&extracted_number));
+            assert!(new_score >= current_score); // Score should not decrease
+            assert_eq!(game.board_length(), i as usize);
+            assert_eq!(game.published_score(), new_score);
+            assert_eq!(game.pouch_length(), 90 - i as usize);
+        }
+
+        // Verify game is now active
+        assert!(game.has_game_started());
+        assert!(!game.is_bingo_reached());
+        assert!(!game.is_game_ended());
+
+        // ========================================================================
+        // PHASE 4: Verify registry state after game becomes active
+        // ========================================================================
+
+        let active_score = game.published_score();
+
+        // Check updated registry statistics
+        let (new_count, active_count, closed_count) = registry.status_summary().unwrap();
+        assert_eq!((new_count, active_count, closed_count), (0, 1, 0));
+
+        // Check updated games list
+        let games_list = registry.games_list().unwrap();
+        assert_eq!(games_list.len(), 1);
+        let (list_game_id, status, info) = &games_list[0];
+        assert_eq!(*list_game_id, game_id);
+        assert_eq!(*status, GameStatus::Active);
+        assert!(info.contains("Active"));
+        assert!(info.contains("board_len=5"));
+        assert!(info.contains(&format!("score={active_score}")));
+        assert!(!info.contains("closed_at=")); // No closed_at for active game
+
+        // Check games by status
+        let new_games = registry.games_by_status(GameStatus::New).unwrap();
+        assert!(new_games.is_empty());
+
+        let active_games = registry.games_by_status(GameStatus::Active).unwrap();
+        assert_eq!(active_games.len(), 1);
+        assert!(active_games.contains(&game_id));
+
+        let closed_games = registry.games_by_status(GameStatus::Closed).unwrap();
+        assert!(closed_games.is_empty());
+
+        // ========================================================================
+        // PHASE 5: Extract numbers until BINGO is reached
+        // ========================================================================
+
+        println!("Extracting numbers until BINGO is reached...");
+
+        // Continue extracting until we reach BINGO (score >= 15)
+        let mut extractions = 5;
+        while !game.is_bingo_reached() && extractions < 90 {
+            let current_score = game.published_score();
+            let extraction_result = game.extract_number(current_score);
+
+            if extraction_result.is_err() {
+                println!("Extraction failed at score {current_score}: {extraction_result:?}");
+                break;
+            }
+
+            let (extracted_number, new_score) = extraction_result.unwrap();
+            extractions += 1;
+
+            println!("Extraction {extractions}: number={extracted_number}, score={new_score}");
+
+            // Verify extraction validity
+            assert!((1..=90).contains(&extracted_number));
+            assert!(new_score >= current_score); // Score should not decrease
+        }
+
+        // Verify BINGO state
+        assert!(game.is_bingo_reached(), "BINGO should have been reached");
+        assert!(game.published_score() >= 15, "Score should be >= 15 for BINGO");
+        assert!(game.is_game_ended(), "Game should be ended when BINGO is reached");
+        assert!(game.has_game_started(), "Game should still show as started");
+
+        println!("BINGO reached! Final score: {}, extractions: {}", game.published_score(), extractions);
+
+        // ========================================================================
+        // PHASE 6: Verify final registry state with closed game and closed_at
+        // ========================================================================
+
+        // Check final registry statistics
+        let (new_count, active_count, closed_count) = registry.status_summary().unwrap();
+        assert_eq!((new_count, active_count, closed_count), (0, 0, 1));
+
+        // Check final games list with closed_at information
+        let games_list = registry.games_list().unwrap();
+        assert_eq!(games_list.len(), 1);
+        let (list_game_id, status, info) = &games_list[0];
+        assert_eq!(*list_game_id, game_id);
+        assert_eq!(*status, GameStatus::Closed);
+        assert!(info.contains("Closed"));
+        assert!(info.contains(&format!("board_len={extractions}")));
+        assert!(info.contains(&format!("score={}", game.published_score())));
+        assert!(info.contains("closed_at=")); // Should now have closed_at
+
+        // Check games by status - should all be in closed
+        let new_games = registry.games_by_status(GameStatus::New).unwrap();
+        assert!(new_games.is_empty());
+
+        let active_games = registry.games_by_status(GameStatus::Active).unwrap();
+        assert!(active_games.is_empty());
+
+        let closed_games = registry.games_by_status(GameStatus::Closed).unwrap();
+        assert_eq!(closed_games.len(), 1);
+        assert!(closed_games.contains(&game_id));
+
+        // ========================================================================
+        // PHASE 7: Verify GameEntry closed_at timestamp is properly set
+        // ========================================================================
+
+        // Get the game entry directly to check closed_at
+        let retrieved_game = registry.get_game(&game_id).unwrap();
+        assert!(retrieved_game.is_some());
+
+        // Access the GameEntry to verify closed_at (we need to access the registry's internal data)
+        // Since we can't directly access the GameEntry, we'll verify through the info string
+        let final_games_list = registry.games_list().unwrap();
+        let (_, _, final_info) = &final_games_list[0];
+
+        // Verify the info contains a properly formatted closed_at timestamp
+        assert!(final_info.contains("closed_at="));
+        let closed_at_part = final_info.split("closed_at=").nth(1).unwrap();
+        let closed_at_time = closed_at_part.split(']').next().unwrap();
+        assert!(closed_at_time.contains("UTC"));
+        assert!(closed_at_time.len() > 10); // Should be a reasonable timestamp
+
+        // ========================================================================
+        // PHASE 8: Verify game state dump functionality
+        // ========================================================================
+
+        // Test that the game can be dumped since it has ended
+        let dump_result = game.dump_if_ended();
+        assert!(dump_result.is_ok(), "Should be able to dump ended game: {dump_result:?}");
+
+        let dump_message = dump_result.unwrap();
+        assert!(dump_message.contains("Game dumped to:"));
+        assert!(dump_message.contains(&game_id));
+        assert!(dump_message.contains(".json"));
+
+        println!("Game successfully dumped: {dump_message}");
+
+        // ========================================================================
+        // PHASE 9: Final verification summary
+        // ========================================================================
+
+        println!("\n========== END-TO-END TEST SUMMARY ==========");
+        println!("✓ Game created and registered successfully");
+        println!("✓ Initial state: New game with no extractions");
+        println!("✓ Registry correctly tracked New status");
+        println!("✓ Game became Active after first extractions");
+        println!("✓ Registry correctly tracked Active status");
+        println!("✓ Game reached BINGO (Closed) after {extractions} extractions");
+        println!("✓ Registry correctly tracked Closed status");
+        println!("✓ GameEntry closed_at timestamp was properly set");
+        println!("✓ Game state was successfully dumped to JSON");
+        println!("✓ Final score: {}", game.published_score());
+        println!("✓ Final board length: {}", game.board_length());
+        println!("✓ Remaining numbers in pouch: {}", game.pouch_length());
+        println!("==============================================\n");
+
+        // Final assertions to ensure everything is in the expected state
+        assert_eq!(registry.total_games().unwrap(), 1);
+        assert!(game.is_game_ended());
+        assert!(game.is_bingo_reached());
+        assert!(game.published_score() >= 15);
+        assert_eq!(game.board_length(), extractions as usize);
+        assert_eq!(game.pouch_length(), 90 - extractions as usize);
     }
 }

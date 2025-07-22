@@ -10,7 +10,7 @@ use tower_http::cors::CorsLayer;
 
 use crate::config::ServerConfig;
 use crate::logging::{log_info, log_error, log_error_stderr};
-use crate::game::Game;
+use crate::game::{Game, GameRegistry};
 use crate::api_handlers::*;
 
 // Response structures for JSON serialization
@@ -22,6 +22,7 @@ struct ErrorResponse {
 
 pub struct AppState {
     pub game: Game,
+    pub game_registry: GameRegistry,
     pub config: ServerConfig,
 }
 
@@ -33,27 +34,39 @@ pub fn start_server(config: ServerConfig) -> (tokio::task::JoinHandle<()>, Arc<A
     let game = Game::new();
     log_info(&format!("Created new game instance: {}", game.game_info()));
 
+    // Create the GameRegistry and register the initial game
+    let game_registry = GameRegistry::new();
+    let game_arc = Arc::new(game.clone());
+    if let Err(e) = game_registry.add_game(game_arc) {
+        log_error(&format!("Failed to register initial game: {e}"));
+    } else {
+        log_info(&format!("Registered initial game in registry: {}", game.id()));
+    }
+
     let handle = tokio::spawn(async move {
         let app_state = Arc::new(AppState {
             game,
+            game_registry,
             config: config.clone(),
         });
 
         let app = Router::new()
-            .route("/register", post(handle_register))
+            // Client & Game Management routes
             .route("/clientinfo", get(handle_client_info))
             .route("/clientinfo/{client_id}", get(handle_client_info_by_id))
-            .route("/generatecards", post(handle_generate_cards))
-            .route("/listassignedcards", get(handle_list_assigned_cards))
-            .route("/getassignedcard/{card_id}", get(handle_get_assigned_card))
-            .route("/board", get(handle_board))
-            .route("/pouch", get(handle_pouch))
-            .route("/scoremap", get(handle_scoremap))
-            .route("/status", get(handle_status))
-            .route("/runninggameid", get(handle_running_game_id))
-            .route("/extract", post(handle_extract))
+            .route("/gameslist", get(handle_games_list))
             .route("/newgame", post(handle_newgame))
-            .route("/dumpgame", post(handle_dumpgame))
+            // Game Functions routes
+            .route("/{game_id}/register", post(handle_register))
+            .route("/{game_id}/generatecards", post(handle_generate_cards))
+            .route("/{game_id}/listassignedcards", get(handle_list_assigned_cards))
+            .route("/{game_id}/getassignedcard/{card_id}", get(handle_get_assigned_card))
+            .route("/{game_id}/board", get(handle_board))
+            .route("/{game_id}/pouch", get(handle_pouch))
+            .route("/{game_id}/scoremap", get(handle_scoremap))
+            .route("/{game_id}/status", get(handle_status))
+            .route("/{game_id}/extract", post(handle_extract))
+            .route("/{game_id}/dumpgame", post(handle_dumpgame))
             .layer(CorsLayer::permissive())
             .with_state(app_state);
 

@@ -28,7 +28,7 @@ pub fn board_id_string() -> String {
 }
 
 // This struct represents the board in the Tombola game.
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Board {
     numbers: Vec<Number>,
     marked_numbers: HashSet<Number>,

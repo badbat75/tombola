@@ -25,6 +25,14 @@ struct Args {
     /// Exit after displaying the current state (no interactive loop)
     #[arg(long)]
     exit: bool,
+
+    /// Game ID to connect to (required unless using --listgames)
+    #[arg(long)]
+    gameid: Option<String>,
+
+    /// List active games and exit
+    #[arg(long)]
+    listgames: bool,
 }
 
 // Client registration request
@@ -90,6 +98,7 @@ pub struct TombolaClient {
     http_client: reqwest::Client,
     registered: bool,
     nocard: Option<u32>,  // Number of cards to generate during registration
+    game_id: Option<String>,  // Game ID to connect to
 }
 
 impl TombolaClient {
@@ -107,6 +116,7 @@ impl TombolaClient {
             http_client,
             registered: false,
             nocard: None,
+            game_id: None,
         }
     }
 
@@ -122,8 +132,9 @@ impl TombolaClient {
             nocard: self.nocard, // Include nocard in the registration request
         };
 
-        let url = format!("{}/register", self.server_url);
-        println!("Registering client '{}' with server...", self.client_name);
+        let game_id = self.game_id.as_ref().ok_or("Game ID not set")?;
+        let url = format!("{}/{}/register", self.server_url, game_id);
+        println!("Registering client '{}' with server for game '{}'...", self.client_name, game_id);
         println!("🔍 Debug: Sending nocard = {:?}", self.nocard);
 
         let response = self
@@ -159,6 +170,21 @@ impl TombolaClient {
         self.nocard = None;
     }
 
+    /// Set the game ID to connect to
+    pub fn set_game_id(&mut self, game_id: String) {
+        self.game_id = Some(game_id);
+    }
+
+    /// Get the current game ID
+    pub fn current_game_id(&self) -> Option<&String> {
+        self.game_id.as_ref()
+    }
+
+    /// Ensure a game ID is set
+    fn ensure_game_id(&self) -> Result<&String, Box<dyn std::error::Error>> {
+        self.game_id.as_ref().ok_or("Game ID not set. Use set_game_id() first.".into())
+    }
+
     /// Get the client ID (must be registered first)
     pub fn get_client_id(&self) -> Option<&String> {
         self.client_id.as_ref()
@@ -172,8 +198,9 @@ impl TombolaClient {
     /// Get the current board state from the server
     pub async fn get_board(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         self.ensure_registered()?;
+        let game_id = self.ensure_game_id()?;
 
-        let url = format!("{}/board", self.server_url);
+        let url = format!("{}/{}/board", self.server_url, game_id);
         let response = self
             .http_client
             .get(&url)
@@ -193,8 +220,9 @@ impl TombolaClient {
     /// Get the current scorecard from the server
     pub async fn get_scorecard(&self) -> Result<ScoreCard, Box<dyn std::error::Error>> {
         self.ensure_registered()?;
+        let game_id = self.ensure_game_id()?;
 
-        let url = format!("{}/scoremap", self.server_url);
+        let url = format!("{}/{}/scoremap", self.server_url, game_id);
         let response = self
             .http_client
             .get(&url)
@@ -214,8 +242,9 @@ impl TombolaClient {
     /// Get the current pouch state from the server
     pub async fn get_pouch(&self) -> Result<(Vec<u8>, usize), Box<dyn std::error::Error>> {
         self.ensure_registered()?;
+        let game_id = self.ensure_game_id()?;
 
-        let url = format!("{}/pouch", self.server_url);
+        let url = format!("{}/{}/pouch", self.server_url, game_id);
         let response = self
             .http_client
             .get(&url)
@@ -236,9 +265,10 @@ impl TombolaClient {
     /// Generate cards for the client
     pub async fn generate_cards(&self, count: u32) -> Result<GenerateCardsResponse, Box<dyn std::error::Error>> {
         self.ensure_registered()?;
+        let game_id = self.ensure_game_id()?;
 
         let request = GenerateCardsRequest { count };
-        let url = format!("{}/generatecardsforme", self.server_url);
+        let url = format!("{}/{}/generatecardsforme", self.server_url, game_id);
 
         let response = self
             .http_client
@@ -260,8 +290,9 @@ impl TombolaClient {
     /// List assigned cards for the client
     pub async fn list_assigned_cards(&self) -> Result<ListAssignedCardsResponse, Box<dyn std::error::Error>> {
         self.ensure_registered()?;
+        let game_id = self.ensure_game_id()?;
 
-        let url = format!("{}/listassignedcards", self.server_url);
+        let url = format!("{}/{}/listassignedcards", self.server_url, game_id);
         let response = self
             .http_client
             .get(&url)
@@ -281,8 +312,9 @@ impl TombolaClient {
     /// Get a specific assigned card by ID
     pub async fn get_assigned_card(&self, card_id: &str) -> Result<CardInfo, Box<dyn std::error::Error>> {
         self.ensure_registered()?;
+        let game_id = self.ensure_game_id()?;
 
-        let url = format!("{}/getassignedcard/{}", self.server_url, card_id);
+        let url = format!("{}/{}/getassignedcard/{}", self.server_url, game_id, card_id);
         let response = self
             .http_client
             .get(&url)
@@ -302,8 +334,9 @@ impl TombolaClient {
     /// Get server status
     pub async fn get_status(&self) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
         self.ensure_registered()?;
+        let game_id = self.ensure_game_id()?;
 
-        let url = format!("{}/status", self.server_url);
+        let url = format!("{}/{}/status", self.server_url, game_id);
         let response = self
             .http_client
             .get(&url)
@@ -322,7 +355,7 @@ impl TombolaClient {
 
     /// Get running game ID and creation details
     pub async fn get_game_id(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let url = format!("{}/runninggameid", self.server_url);
+        let url = format!("{}/gameslist", self.server_url);
         let response = self
             .http_client
             .get(&url)
@@ -330,18 +363,68 @@ impl TombolaClient {
             .await?;
 
         if response.status().is_success() {
-            let game_info: serde_json::Value = response.json().await?;
-            if let (Some(game_id), Some(created_at)) = (
-                game_info["game_id"].as_str(),
-                game_info["created_at"].as_str()
-            ) {
-                Ok(format!("{game_id}, started at: {created_at}"))
+            let games_info: serde_json::Value = response.json().await?;
+
+            if let Some(games) = games_info["games"].as_array() {
+                // Find the first non-closed game
+                for game in games {
+                    if let (Some(game_id), Some(status), Some(start_date)) = (
+                        game["game_id"].as_str(),
+                        game["status"].as_str(),
+                        game["start_date"].as_str()
+                    ) {
+                        if status != "Closed" {
+                            return Ok(format!("{game_id}, started at: {start_date}"));
+                        }
+                    }
+                }
+                Err("No available games found".into())
             } else {
-                Err("Game ID or creation time not found in response".into())
+                Err("Invalid response format from games list endpoint".into())
             }
         } else {
             let error_response: ErrorResponse = response.json().await?;
             Err(format!("Failed to get game ID: {}", error_response.error).into())
+        }
+    }
+
+    /// List active games
+    pub async fn list_games(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let url = format!("{}/gameslist", self.server_url);
+        let response = self
+            .http_client
+            .get(&url)
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let games_info: serde_json::Value = response.json().await?;
+
+            if let Some(games) = games_info["games"].as_array() {
+                if games.is_empty() {
+                    println!("No games found.");
+                } else {
+                    println!("Available games:");
+                    for game in games {
+                        if let (Some(game_id), Some(status), Some(start_date)) = (
+                            game["game_id"].as_str(),
+                            game["status"].as_str(),
+                            game["start_date"].as_str()
+                        ) {
+                            // Only show non-closed games
+                            if status != "Closed" {
+                                println!("  {game_id} - {status} (created: {start_date})");
+                            }
+                        }
+                    }
+                }
+            } else {
+                println!("Invalid response format from games list endpoint.");
+            }
+            Ok(())
+        } else {
+            let error_response: ErrorResponse = response.json().await?;
+            Err(format!("Failed to list games: {}", error_response.error).into())
         }
     }
 
@@ -401,8 +484,60 @@ async fn main() {
     // Determine client name from args or config
     let client_name = args.name.unwrap_or_else(|| config.client_name.clone());
 
-    // Create and register client
+    // Create client
     let mut client = TombolaClient::new(&client_name, &server_url);
+
+    // Handle list games request
+    if args.listgames {
+        match client.list_games().await {
+            Ok(()) => {
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("❌ Failed to list games: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Determine game_id
+    let game_id = if let Some(provided_game_id) = args.gameid {
+        provided_game_id
+    } else {
+        // No game_id provided - show games list first
+        match client.list_games().await {
+            Ok(()) => {
+                println!();
+                println!("Please specify a game ID using --gameid <id> to join a specific game.");
+                std::process::exit(0);
+            },
+            Err(e) => {
+                eprintln!("❌ Failed to list games: {e}");
+                // Fall back to trying to get current running game as before
+                match client.get_game_id().await {
+                    Ok(game_info) => {
+                        // Extract just the game_id from the formatted string
+                        if let Some(id) = game_info.split(',').next() {
+                            println!("🔄 No games list available, using detected game: {}", id.trim());
+                            id.trim().to_string()
+                        } else {
+                            eprintln!("❌ Failed to extract game ID from response");
+                            std::process::exit(1);
+                        }
+                    },
+                    Err(_) => {
+                        eprintln!("❌ No game ID provided and no running game found.");
+                        eprintln!("Use --gameid <id> to specify a game or --listgames to see available games.");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+    };
+
+    // Set the game ID in the client
+    client.set_game_id(game_id.clone());
+    println!("🎮 Using game ID: {game_id}");
 
     // Check for nocard option
     if let Some(nocard_value) = args.nocard {
