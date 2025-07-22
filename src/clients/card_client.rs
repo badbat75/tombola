@@ -1,13 +1,43 @@
+// src/clients/card_client.rs
+//
+// Interactive tombola player client for card management and gameplay monitoring.
+// This client uses the centralized client library modules to eliminate code duplication.
+//
+// Architecture:
+// - Uses api_client module for authenticated HTTP API communication
+// - Uses card_management module for card operations
+// - Uses registration module for client authentication
+// - Uses game_utils module for game discovery
+// - Modular design allows focused functionality without duplication
+//
+// Features:
+// - Client registration with server authentication
+// - Card generation and assignment management
+// - Real-time game monitoring with automatic updates
+// - Achievement tracking and BINGO detection
+// - Interactive card display with number highlighting
+// - Game discovery and selection capabilities
+//
+// CLI Options:
+// - --name: Override client name from configuration
+// - --nocard: Number of cards to request during registration
+// - --exit: Display current state once and exit
+// - --gameid: Specify game ID to connect to
+// - --listgames: List active games and exit
+
 use tombola::defs::{NUMBERSPERCARD};
 use tombola::score::ScoreCard;
-use tombola::board::Board;
-use tombola::pouch::Pouch;
 use tombola::config::ClientConfig;
 
 use std::time::Duration;
-use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 use clap::Parser;
+
+// Include shared modules
+use tombola::clients::{common, game_utils, api_client, card_management};
+mod registration;
+
+use common::*;
 
 #[derive(Parser)]
 #[command(name = env!("CARGO_BIN_NAME"))]
@@ -33,60 +63,6 @@ struct Args {
     /// List active games and exit
     #[arg(long)]
     listgames: bool,
-}
-
-// Client registration request
-#[derive(Debug, Serialize)]
-struct RegisterRequest {
-    name: String,
-    client_type: String,
-    nocard: Option<u32>,  // Number of cards to generate during registration
-}
-
-// Client registration response
-#[derive(Debug, Deserialize)]
-struct RegisterResponse {
-    client_id: String,
-    message: String,
-}
-
-// Generic API response structure
-#[derive(Debug, Deserialize)]
-struct ErrorResponse {
-    error: String,
-}
-
-// Card generation request
-#[derive(Debug, Serialize)]
-struct GenerateCardsRequest {
-    count: u32,
-}
-
-// Card generation response
-#[derive(Debug, Deserialize)]
-pub struct GenerateCardsResponse {
-    pub cards: Vec<CardInfo>,
-    pub message: String,
-}
-
-// Card info structure
-#[derive(Debug, Deserialize)]
-pub struct CardInfo {
-    pub card_id: String,
-    pub card_data: Vec<Vec<Option<u8>>>, // 2D vector of optional u8 values
-}
-
-// List assigned cards response
-#[derive(Debug, Deserialize)]
-pub struct ListAssignedCardsResponse {
-    pub cards: Vec<AssignedCardInfo>,
-}
-
-// Assigned card info
-#[derive(Debug, Deserialize)]
-pub struct AssignedCardInfo {
-    pub card_id: String,
-    pub assigned_to: String,
 }
 
 // Tombola client structure
@@ -126,38 +102,27 @@ impl TombolaClient {
             return Ok(());
         }
 
-        let register_request = RegisterRequest {
-            name: self.client_name.clone(),
-            client_type: "tombola_client".to_string(),
-            nocard: self.nocard, // Include nocard in the registration request
-        };
-
         let game_id = self.game_id.as_ref().ok_or("Game ID not set")?;
-        let url = format!("{}/{}/register", self.server_url, game_id);
         println!("Registering client '{}' with server for game '{}'...", self.client_name, game_id);
         println!("🔍 Debug: Sending nocard = {:?}", self.nocard);
 
-        let response = self
-            .http_client
-            .post(&url)
-            .json(&register_request)
-            .send()
-            .await?;
+        let register_response = registration::register_client(
+            &self.server_url,
+            game_id,
+            &self.client_name,
+            "tombola_client",
+            self.nocard,
+            &self.http_client
+        ).await?;
 
-        if response.status().is_success() {
-            let register_response: RegisterResponse = response.json().await?;
-            self.client_id = Some(register_response.client_id.clone());
-            self.registered = true;
+        self.client_id = Some(register_response.client_id.clone());
+        self.registered = true;
 
-            println!("✅ Registration successful!");
-            println!("   Client ID: {}", register_response.client_id);
-            println!("   Message: {}", register_response.message);
+        println!("✅ Registration successful!");
+        println!("   Client ID: {}", register_response.client_id);
+        println!("   Message: {}", register_response.message);
 
-            Ok(())
-        } else {
-            let error_text = response.text().await?;
-            Err(format!("Registration failed: {error_text}").into())
-        }
+        Ok(())
     }
 
     /// Set the number of cards to generate during registration
@@ -199,233 +164,73 @@ impl TombolaClient {
     pub async fn get_board(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         self.ensure_registered()?;
         let game_id = self.ensure_game_id()?;
+        let client_id = self.client_id.as_ref().unwrap();
 
-        let url = format!("{}/{}/board", self.server_url, game_id);
-        let response = self
-            .http_client
-            .get(&url)
-            .header("X-Client-ID", self.client_id.as_ref().unwrap())
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            let board: Board = response.json().await?;
-            Ok(board.get_numbers().clone())
-        } else {
-            let error_response: ErrorResponse = response.json().await?;
-            Err(format!("Failed to get board: {}", error_response.error).into())
-        }
+        api_client::get_board_with_auth(&self.server_url, game_id, client_id).await
     }
 
     /// Get the current scorecard from the server
     pub async fn get_scorecard(&self) -> Result<ScoreCard, Box<dyn std::error::Error>> {
         self.ensure_registered()?;
         let game_id = self.ensure_game_id()?;
+        let client_id = self.client_id.as_ref().unwrap();
 
-        let url = format!("{}/{}/scoremap", self.server_url, game_id);
-        let response = self
-            .http_client
-            .get(&url)
-            .header("X-Client-ID", self.client_id.as_ref().unwrap())
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            let scorecard: ScoreCard = response.json().await?;
-            Ok(scorecard)
-        } else {
-            let error_response: ErrorResponse = response.json().await?;
-            Err(format!("Failed to get scorecard: {}", error_response.error).into())
-        }
+        api_client::get_scorecard_with_auth(&self.server_url, game_id, client_id).await
     }
 
     /// Get the current pouch state from the server
     pub async fn get_pouch(&self) -> Result<(Vec<u8>, usize), Box<dyn std::error::Error>> {
         self.ensure_registered()?;
         let game_id = self.ensure_game_id()?;
+        let client_id = self.client_id.as_ref().unwrap();
 
-        let url = format!("{}/{}/pouch", self.server_url, game_id);
-        let response = self
-            .http_client
-            .get(&url)
-            .header("X-Client-ID", self.client_id.as_ref().unwrap())
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            let pouch: Pouch = response.json().await?;
-            let remaining_count = pouch.len();
-            Ok((pouch.numbers, remaining_count))
-        } else {
-            let error_response: ErrorResponse = response.json().await?;
-            Err(format!("Failed to get pouch: {}", error_response.error).into())
-        }
+        api_client::get_pouch_with_auth(&self.server_url, game_id, client_id).await
     }
 
     /// Generate cards for the client
     pub async fn generate_cards(&self, count: u32) -> Result<GenerateCardsResponse, Box<dyn std::error::Error>> {
         self.ensure_registered()?;
         let game_id = self.ensure_game_id()?;
+        let client_id = self.client_id.as_ref().unwrap();
 
-        let request = GenerateCardsRequest { count };
-        let url = format!("{}/{}/generatecardsforme", self.server_url, game_id);
-
-        let response = self
-            .http_client
-            .post(&url)
-            .header("X-Client-ID", self.client_id.as_ref().unwrap())
-            .json(&request)
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            let generate_response: GenerateCardsResponse = response.json().await?;
-            Ok(generate_response)
-        } else {
-            let error_response: ErrorResponse = response.json().await?;
-            Err(format!("Failed to generate cards: {}", error_response.error).into())
-        }
+        card_management::generate_cards(&self.server_url, game_id, client_id, count, &self.http_client).await
     }
 
     /// List assigned cards for the client
     pub async fn list_assigned_cards(&self) -> Result<ListAssignedCardsResponse, Box<dyn std::error::Error>> {
         self.ensure_registered()?;
         let game_id = self.ensure_game_id()?;
+        let client_id = self.client_id.as_ref().unwrap();
 
-        let url = format!("{}/{}/listassignedcards", self.server_url, game_id);
-        let response = self
-            .http_client
-            .get(&url)
-            .header("X-Client-ID", self.client_id.as_ref().unwrap())
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            let list_response: ListAssignedCardsResponse = response.json().await?;
-            Ok(list_response)
-        } else {
-            let error_response: ErrorResponse = response.json().await?;
-            Err(format!("Failed to list assigned cards: {}", error_response.error).into())
-        }
+        card_management::list_assigned_cards(&self.server_url, game_id, client_id, &self.http_client).await
     }
 
     /// Get a specific assigned card by ID
     pub async fn get_assigned_card(&self, card_id: &str) -> Result<CardInfo, Box<dyn std::error::Error>> {
         self.ensure_registered()?;
         let game_id = self.ensure_game_id()?;
+        let client_id = self.client_id.as_ref().unwrap();
 
-        let url = format!("{}/{}/getassignedcard/{}", self.server_url, game_id, card_id);
-        let response = self
-            .http_client
-            .get(&url)
-            .header("X-Client-ID", self.client_id.as_ref().unwrap())
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            let card_info: CardInfo = response.json().await?;
-            Ok(card_info)
-        } else {
-            let error_response: ErrorResponse = response.json().await?;
-            Err(format!("Failed to get assigned card: {}", error_response.error).into())
-        }
+        card_management::get_assigned_card(&self.server_url, game_id, client_id, card_id, &self.http_client).await
     }
 
     /// Get server status
     pub async fn get_status(&self) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
         self.ensure_registered()?;
         let game_id = self.ensure_game_id()?;
+        let client_id = self.client_id.as_ref().unwrap();
 
-        let url = format!("{}/{}/status", self.server_url, game_id);
-        let response = self
-            .http_client
-            .get(&url)
-            .header("X-Client-ID", self.client_id.as_ref().unwrap())
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            let status: serde_json::Value = response.json().await?;
-            Ok(status)
-        } else {
-            let error_response: ErrorResponse = response.json().await?;
-            Err(format!("Failed to get status: {}", error_response.error).into())
-        }
+        api_client::get_game_status(&self.server_url, game_id, client_id).await
     }
 
     /// Get running game ID and creation details
     pub async fn get_game_id(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let url = format!("{}/gameslist", self.server_url);
-        let response = self
-            .http_client
-            .get(&url)
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            let games_info: serde_json::Value = response.json().await?;
-
-            if let Some(games) = games_info["games"].as_array() {
-                // Find the first non-closed game
-                for game in games {
-                    if let (Some(game_id), Some(status), Some(start_date)) = (
-                        game["game_id"].as_str(),
-                        game["status"].as_str(),
-                        game["start_date"].as_str()
-                    ) {
-                        if status != "Closed" {
-                            return Ok(format!("{game_id}, started at: {start_date}"));
-                        }
-                    }
-                }
-                Err("No available games found".into())
-            } else {
-                Err("Invalid response format from games list endpoint".into())
-            }
-        } else {
-            let error_response: ErrorResponse = response.json().await?;
-            Err(format!("Failed to get game ID: {}", error_response.error).into())
-        }
+        game_utils::get_game_id(&self.server_url).await
     }
 
     /// List active games
     pub async fn list_games(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let url = format!("{}/gameslist", self.server_url);
-        let response = self
-            .http_client
-            .get(&url)
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            let games_info: serde_json::Value = response.json().await?;
-
-            if let Some(games) = games_info["games"].as_array() {
-                if games.is_empty() {
-                    println!("No games found.");
-                } else {
-                    println!("Available games:");
-                    for game in games {
-                        if let (Some(game_id), Some(status), Some(start_date)) = (
-                            game["game_id"].as_str(),
-                            game["status"].as_str(),
-                            game["start_date"].as_str()
-                        ) {
-                            // Only show non-closed games
-                            if status != "Closed" {
-                                println!("  {game_id} - {status} (created: {start_date})");
-                            }
-                        }
-                    }
-                }
-            } else {
-                println!("Invalid response format from games list endpoint.");
-            }
-            Ok(())
-        } else {
-            let error_response: ErrorResponse = response.json().await?;
-            Err(format!("Failed to list games: {}", error_response.error).into())
-        }
+        game_utils::list_games(&self.server_url).await
     }
 
     /// Start monitoring the game (polls server for updates)
@@ -500,38 +305,12 @@ async fn main() {
         }
     }
 
-    // Determine game_id
-    let game_id = if let Some(provided_game_id) = args.gameid {
-        provided_game_id
-    } else {
-        // No game_id provided - show games list first
-        match client.list_games().await {
-            Ok(()) => {
-                println!();
-                println!("Please specify a game ID using --gameid <id> to join a specific game.");
-                std::process::exit(0);
-            },
-            Err(e) => {
-                eprintln!("❌ Failed to list games: {e}");
-                // Fall back to trying to get current running game as before
-                match client.get_game_id().await {
-                    Ok(game_info) => {
-                        // Extract just the game_id from the formatted string
-                        if let Some(id) = game_info.split(',').next() {
-                            println!("🔄 No games list available, using detected game: {}", id.trim());
-                            id.trim().to_string()
-                        } else {
-                            eprintln!("❌ Failed to extract game ID from response");
-                            std::process::exit(1);
-                        }
-                    },
-                    Err(_) => {
-                        eprintln!("❌ No game ID provided and no running game found.");
-                        eprintln!("Use --gameid <id> to specify a game or --listgames to see available games.");
-                        std::process::exit(1);
-                    }
-                }
-            }
+    // Determine game_id using centralized game discovery
+    let game_id = match game_utils::discover_game_id(&server_url, args.gameid).await {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("❌ Failed to discover game: {e}");
+            std::process::exit(1);
         }
     };
 

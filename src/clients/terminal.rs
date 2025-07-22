@@ -6,7 +6,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode},
 };
 
-use crate::defs::{BOARDCONFIG, NUMBERSPERCARD, Number, Colors};
+use crate::defs::{BOARDCONFIG, Number, Colors};
 use crate::board::Board;
 
 pub struct DeltaPos {
@@ -78,63 +78,6 @@ pub fn print_board(board: &Board) {
 // Function to output the last n previous numbers from the board
 pub fn print_last_numbers(board: &Board, n: usize) -> Vec<Number> {
     board.get_last_numbers(n)
-}
-
-pub fn show_on_terminal(
-    board: &Board,
-    pouch: &[Number],
-    scorecard: &crate::score::ScoreCard,
-) {
-    // Get the last extracted number from the board
-    let extracted = board.get_numbers().last().copied().unwrap_or(0);
-
-    println!("Last number: {}{extracted}{}", Colors::green(), Colors::reset());
-    println!("Previous numbers: {:?}", print_last_numbers(board, 3));
-    println!("\nCurrent board:");
-    print_board(board);
-    println!();
-
-
-    // Print scorecard (score_idx, [cardid1, cardid2, ...]) in reverse order
-    if scorecard.published_score >= 2 {
-        println!();
-        println!("ScoreCard achievements:");
-        let mut achievements: Vec<_> = scorecard.score_map.iter().collect();
-        achievements.sort_by(|a, b| b.0.cmp(a.0)); // Sort descending by score_idx
-        for (score_idx, score_achievements) in achievements {
-            // Mark numbers only if scorecard reaches a NEW goal
-            match score_idx {
-                2 => print!("{}TWO in line{}", Colors::yellow(), Colors::reset()),
-                3 => print!("{}THREE in line{}", Colors::yellow(), Colors::reset()),
-                4 => print!("{}FOUR in line{}", Colors::yellow(), Colors::reset()),
-                5 => print!("{}FIVE in line{}", Colors::yellow(), Colors::reset()),
-                x if *x == NUMBERSPERCARD => print!("{}BINGO!!!{}", Colors::yellow(), Colors::reset()),
-                _ => {} // Handle all other cases (do nothing)
-            }
-
-            // Display card IDs with client IDs and their contributing numbers
-            print!(" -> ");
-            for (i, achievement) in score_achievements.iter().enumerate() {
-                if i > 0 { print!(", "); }
-                if achievement.numbers.is_empty() {
-                    print!("{} [{}] (no numbers)", achievement.client_id, achievement.card_id);
-                } else {
-                    print!("{} [{}] (numbers: {:?})", achievement.client_id, achievement.card_id, achievement.numbers);
-                }
-            }
-            println!();
-        }
-    }
-
-    if ! pouch.is_empty() {
-        println!("\nRemaining in pouch {}:", pouch.len());
-        for &pouch_num in pouch {
-            print!("{pouch_num:2} ");
-        }
-        println!();
-    }
-
-    println!();
 }
 
 pub enum KeyAction {

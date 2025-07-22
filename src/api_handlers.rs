@@ -1818,7 +1818,7 @@ mod tests {
             .count();
 
         // We should have at least 3 closed games (the ones we completed)
-        assert!(closed_games_count >= 3, "Expected at least 3 closed games, found {}", closed_games_count);
+        assert!(closed_games_count >= 3, "Expected at least 3 closed games, found {closed_games_count}");
 
         let stats = &final_response["statistics"];
         println!("📈 Final statistics:");

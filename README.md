@@ -4,11 +4,26 @@ A Rust-based multi-binary tombola (bingo) game with a client-server architecture
 
 ## Architecture
 
-This project consists of three main binaries:
+This project consists of three main binaries with a modular client library architecture:
 
 - **`tombola-server`**: Main game server with terminal UI and HTTP API
 - **`tombola-client`**: Terminal client that displays current game state
 - **`tombola-player`**: Interactive client for card management and gameplay
+
+### Client Module Architecture
+
+The clients are built using a modular architecture with shared functionality organized as library modules in `src/clients/`:
+
+- **`common.rs`**: Shared data structures and HTTP utilities for API communication
+- **`game_utils.rs`**: Game discovery, listing, and management utilities
+- **`api_client.rs`**: Centralized HTTP API client functions with authentication support
+- **`card_management.rs`**: Card-specific operations (generation, listing, assignment)
+- **`registration.rs`**: Client registration and authentication utilities
+- **`terminal.rs`**: Terminal UI utilities for board display and user interaction
+
+This modular design eliminates code duplication between clients while maintaining clean separation of concerns.
+
+*For detailed client architecture, features, and usage information, see [docs/CLIENTS.md](docs/CLIENTS.md).*
 
 ### Multi-Game Architecture
 
@@ -35,15 +50,15 @@ The server now supports multiple concurrent games through a **GameRegistry** sys
   - CORS support for web client integration
 
 - **Client Components:**
+  - **Modular Client Library**: Centralized shared functionality in `src/clients/` library
   - Terminal-based board display client with CLI options
   - Interactive card management client with multi-game support
   - HTTP API integration with authentication via `X-Client-ID` headers
-  - Command-line game reset capabilities through `/newgame` endpoint
-  - File-based configuration support
-  - Real-time game state synchronization across multiple games
-  - Game selection and listing capabilities via `/gameslist` endpoint
-  - Automatic game ID detection and management
-  - **Smart Game Discovery**: Clients without specified game ID automatically list available games
+  - Smart game discovery and automatic game listing
+  - Centralized API communication and error handling
+  - Common data structures across all clients
+
+*For detailed client features, CLI options, and usage examples, see [docs/CLIENTS.md](docs/CLIENTS.md).*
 
 ## Configuration
 
@@ -59,142 +74,20 @@ The game uses configurable card layouts and settings:
 ## Build and Run
 
 ```bash
-# Build all binaries
+# Build all binaries (server and clients)
 cargo build --release
 
 # Run main server (includes terminal UI and HTTP API)
 cargo run --bin tombola-server
 
-# Run display-only client (shows available games and instructions if no game ID specified)
+# Run display-only client
 cargo run --bin tombola-client
 
-# Run display-only client with specific game ID
-cargo run --bin tombola-client -- --gameid game_12345678
-
-# Run display-only client with new game creation
-cargo run --bin tombola-client -- --newgame
-
-# Run display-only client in non-interactive mode (list games and exit)
-cargo run --bin tombola-client -- --exit
-
-# Run interactive card client (shows available games and instructions if no game ID specified)
+# Run interactive card client
 cargo run --bin tombola-player
-
-# Run interactive card client with specific game and settings
-cargo run --bin tombola-player -- --gameid game_12345678 --name "Player1" --nocard 3
-
-# Run card client in non-interactive mode (list games/status and exit)
-cargo run --bin tombola-player -- --exit
 ```
 
-## Client Options
-
-### Board Client CLI Options
-
-The `tombola-client` supports the following command-line options:
-
-- `--newgame`: Create a new game before starting the client interface
-- `--gameid <GAME_ID>`: Specify the game ID to connect to
-- `--exit`: Exit after displaying the current state (no interactive loop)
-- `--listgames`: List available games and exit
-- `--help`: Display help information
-- `--version`: Display version information
-
-**Default Behavior (No Game ID Specified):**
-- Automatically calls `/gameslist` endpoint to display available games
-- Shows game status, creation times, and statistics
-- Exits with instructions to use `--gameid <id>` to join a specific game or `--newgame` to create one
-
-**Examples:**
-```bash
-# Start board client normally (shows games list and instructions)
-cargo run --bin tombola-client
-
-# Start board client with new game creation
-cargo run --bin tombola-client -- --newgame
-
-# Connect to a specific game
-cargo run --bin tombola-client -- --gameid game_12345678
-
-# Display games list once and exit (non-interactive mode)
-cargo run --bin tombola-client -- --exit
-
-# Explicitly list games and exit
-cargo run --bin tombola-client -- --listgames
-
-# Combine options: create new game and exit after display
-cargo run --bin tombola-client -- --newgame --exit
-
-# Get help information
-cargo run --bin tombola-client -- --help
-```
-
-**Notes about --newgame option:**
-- Only the board client can create new games (uses client ID "0000000000000000")
-- Creates a completely new game in the GameRegistry with a unique game ID
-- The original game continues to exist and can be accessed separately
-- New game is registered in the multi-game registry for independent access
-- Displays confirmation with new game ID and creation timestamp
-- If the creation fails, the client continues with the current game state
-- Equivalent to calling the `/newgame` API endpoint manually
-- **Multi-Game Behavior**: Does not reset existing games, but adds a new one to the registry
-
-**Notes about --exit option:**
-- Provides non-interactive mode for both board and player clients
-- Displays current game state once and exits immediately
-- Useful for automation, scripting, or status checking
-- Can be combined with other options like --newgame
-
-### Player Client CLI Options
-
-The `tombola-player` supports the following command-line options:
-
-- `--name <NAME>`: Set client name (overrides config file)
-- `--gameid <GAME_ID>`: Specify the game ID to connect to
-- `--nocard <COUNT>`: Number of cards to request during registration
-- `--exit`: Exit after displaying the current state (no interactive loop)
-- `--listgames`: List available games and exit
-- `--help`: Display help information
-- `--version`: Display version information
-
-**Default Behavior (No Game ID Specified):**
-- Automatically calls `/gameslist` endpoint to display available games
-- Shows game status, client counts, and game statistics
-- Exits with instructions to use `--gameid <id>` to join a specific game
-
-**Examples:**
-```bash
-# Start player client normally (shows games list and instructions)
-cargo run --bin tombola-player
-
-# Connect to a specific game with custom name and cards
-cargo run --bin tombola-player -- --gameid game_12345678 --name "Player1" --nocard 3
-
-# Display games list once and exit (non-interactive mode)
-cargo run --bin tombola-player -- --exit
-
-# Connect to specific game and exit after displaying status
-cargo run --bin tombola-player -- --gameid game_12345678 --exit
-
-# Explicitly list games and exit
-cargo run --bin tombola-player -- --listgames
-
-# Get help information
-cargo run --bin tombola-player -- --help
-```
-
-**Notes about --exit option:**
-- Provides non-interactive mode for monitoring games list and client status
-- Displays available games list once and exits immediately when no game ID specified
-- Displays current game state, cards, and achievements once and exits when in a specific game
-- Useful for automation, status checking, or integration with other tools
-
-**Card Generation Optimization:**
-- The player client intelligently checks for existing card assignments before generating new cards
-- If cards are already assigned to the client, card generation is skipped even if `--nocard` is specified
-- This optimization reduces unnecessary server requests and improves performance for reconnecting clients
-- Useful for automation, status checking, or integration with other tools
-- Can be combined with other options like --name and --nocard
+*For detailed client CLI options and usage examples, see [docs/CLIENTS.md](docs/CLIENTS.md).*
 
 ## HTTP API
 
@@ -234,17 +127,7 @@ The server provides a RESTful HTTP API on `http://127.0.0.1:3000` with **game-sp
 - **Any key**: Draw next number from pouch
 - **ESC**: Exit server
 
-## Client Controls
-
-### Board Client:
-- **ENTER**: Extract a number from the pouch (when prompted)
-- **F5**: Refresh the screen and update game state without extracting
-- **ESC**: Exit the client
-
-### Card Client:
-- Interactive menu-driven interface for card management
-- Card assignment and viewing capabilities
-- Integration with HTTP API for real-time updates
+*For client controls and interaction details, see [docs/CLIENTS.md](docs/CLIENTS.md).*
 
 ## Core Architecture
 

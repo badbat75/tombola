@@ -1,5 +1,22 @@
 # Tombola Game Architecture
 
+## Workspace Structure
+
+The Tombola project is organized as a single Cargo crate with multiple binaries:
+
+- **Main Crate (`tombola`)**: Contains the core game logic, server implementation, client applications, and shared libraries
+- **Client Modules (`src/clients/`)**: Contains client applications and shared utilities as library modules within the main crate
+
+This unified structure provides:
+- **Clear Dependency Management**: Client modules can directly access core game types
+- **Simplified Build Process**: All components build together as a single crate
+- **Modular Development**: Client code is organized in dedicated modules
+- **Easier Testing**: Client functionality can be tested as part of the main crate
+- **Code Reuse**: Common client functionality is centralized in shared library modules
+- **Reduced Duplication**: HTTP utilities, data structures, and API patterns are shared
+
+*For detailed client architecture information, see [CLIENTS.md](CLIENTS.md).*
+
 ## Multi-Game Architecture Overview
 
 The Tombola server now supports multiple concurrent games through a **GameRegistry** system, providing complete game isolation and independent state management.
@@ -75,6 +92,8 @@ The Tombola server now supports multiple concurrent games through a **GameRegist
 - **CLI Integration**: `--listgames` flag for explicit game discovery
 - **Backward Compatibility**: Maintains existing behavior when game ID is specified
 
+*For detailed client information, see [CLIENTS.md](CLIENTS.md).*
+
 ### Client Registry (`src/client.rs`)
 - **Game-Specific Registration**: Thread-safe client registration per game instance
 - **Registration Timing**: Prevents new client registration after game starts (numbers extracted)
@@ -88,35 +107,16 @@ Cards are generated as groups of 6 with anti-adjacency rules:
 - Numbers are positioned to avoid adjacent placement across cards
 - Use `CardManagement::generate_card_group()` for compliant card sets
 
-### Terminal UI (`src/terminal.rs`)
-- Uses crossterm for cross-platform terminal control
-- Color coding: Green for current number, Yellow for marked/winning numbers
-- Board layout calculated with `downrightshift()` for proper spacing
-- Interactive controls for clients:
-  - `tombola-client`: ENTER to extract, F5 to refresh, ESC to exit
-  - `tombola-server`: Any key to extract, ESC to exit
-  - CLI support for game reset with `--newgame` option
-- **Smart Discovery**: Clients automatically list available games when no game ID specified
-- **Multi-Game CLI**: `--gameid <id>` for specific game selection, `--listgames` for discovery
+### Terminal UI (`src/clients/terminal.rs`)
+*For detailed terminal UI information, see [CLIENTS.md](CLIENTS.md).*
 
 ## Client Architecture
 
-### Board Client (`src/tombola_client.rs`)
-- **Purpose**: Display-only client for monitoring game board state
-- **Smart Discovery**: Automatically shows available games when no game ID specified
-- **Game Creation**: Can create new games via `--newgame` flag (board client privileges)
-- **Non-Interactive Mode**: `--exit` flag for single-state display and immediate exit
-- **CLI Options**: Comprehensive command-line interface with help and version support
-
-### Player Client (`src/card_client.rs`)
-- **Purpose**: Interactive client for card management and gameplay
-- **Smart Discovery**: Automatically shows available games with instructional messaging
-- **Card Management**: Registration, card generation, and real-time game monitoring
-- **Game Selection**: Must specify game ID to participate in specific games
-- **Interactive Interface**: Menu-driven card viewing and game state monitoring
+*For complete client architecture documentation, see [CLIENTS.md](CLIENTS.md).*
 
 ## File Organization
 
+### Main Crate (`tombola`)
 - `src/game.rs`: Multi-game registry and unified game state management with unique IDs and timestamps
 - `src/defs.rs`: Core constants and type definitions
 - `src/board.rs`: Game board state management
@@ -125,13 +125,16 @@ Cards are generated as groups of 6 with anti-adjacency rules:
 - `src/client.rs`: Game-specific client registration and management
 - `src/server.rs`: Multi-game HTTP API server implementation (Axum-based)
 - `src/api_handlers.rs`: Game-specific API handler functions with routing
-- `src/terminal.rs`: Terminal UI rendering with smart discovery features
 - `src/pouch.rs`: Number extraction logic
 - `src/config.rs`: Configuration management for server and client settings
 - `src/logging.rs`: Centralized logging utilities
 - `src/extraction.rs`: Shared extraction logic for server and API
-- `src/lib.rs`: Library structure for shared functionality
-- `src/tombola_client.rs`: Board display client with smart game discovery
-- `src/card_client.rs`: Interactive player client with multi-game support
+- `src/lib.rs`: Library structure with client modules for shared functionality
 - `src/tombola_server.rs`: Main server binary with terminal UI
 - `src/server_old.rs`: Legacy Hyper-based server implementation (deprecated)
+
+### Client Modules (`src/clients/`)
+*For detailed client module documentation, see [CLIENTS.md](CLIENTS.md).*
+
+- `src/clients/tombola_client.rs`: Board display client binary with smart game discovery
+- `src/clients/card_client.rs`: Interactive player client binary with multi-game support

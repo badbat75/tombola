@@ -11,7 +11,7 @@
 - Unless you want to test the business logic do not build the binaries every time, just run `cargo check`.
 
 ## Code Rules
-- Use `Context7 MCP` for language references, libraries, and tools and examples.
+- Use `Context7 MCP`.
 - For print statements, use this format: `println!("Hello, {NAME}. Nice to meet you!");`.
 - Prefer references (Borrows '&') over clones or copies unless necessary.
 - Use consistent types for variables, functions, and structs.

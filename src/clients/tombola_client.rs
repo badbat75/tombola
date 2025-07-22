@@ -1,7 +1,13 @@
 // src/tombola_client.rs
 //
-// This module provides a terminal client that retrieves board and scorecard data from the API,
-// displays it using the terminal functions, and allows interactive number extraction.
+// Terminal-based tombola board client that displays game state and allows interactive number extraction.
+// This client uses the centralized client library modules for API communication and shared functionality.
+//
+// Architecture:
+// - Uses api_client module for all HTTP API communication
+// - Uses game_utils module for game discovery and management
+// - Uses terminal module for display and user interaction
+// - Direct calls to centralized modules eliminate code duplication
 //
 // Interactive Controls:
 // - ENTER: Extract a number using the /extract API endpoint
@@ -13,12 +19,17 @@
 // - --gameid: Specify the game ID to connect to
 // - --listgames: List active games and exit
 
+use tombola::clients::terminal;
+
+// Use shared modules from library
+use tombola::clients::{game_utils, api_client};
+
 use std::error::Error;
 use clap::Parser;
 use tombola::defs::Number;
 use tombola::board::{Board, BOARD_ID};
-use tombola::terminal;
 use tombola::config::ClientConfig;
+
 
 #[derive(Parser)]
 #[command(name = env!("CARGO_BIN_NAME"))]
@@ -79,15 +90,15 @@ pub async fn run_client() -> Result<(), Box<dyn Error>> {
     let server_base_url = config.server_url();
 
     // Try to show games list first, then fall back to get current running game
-    match list_games(&server_base_url).await {
+    match game_utils::list_games(&server_base_url).await {
         Ok(()) => {
             println!();
             println!("Please specify a game ID using the command-line interface with --gameid <id>");
-            return Ok(());
+            Ok(())
         },
         Err(_) => {
             // Fall back to trying to get current running game
-            let game_id = match get_game_id(&server_base_url).await {
+            let game_id = match game_utils::get_game_id(&server_base_url).await {
                 Ok(game_info) => {
                     if let Some(id) = game_info.split(',').next() {
                         println!("Using detected game: {}", id.trim());
@@ -112,15 +123,15 @@ pub async fn run_client_once() -> Result<(), Box<dyn Error>> {
     let server_base_url = config.server_url();
 
     // Try to show games list first, then fall back to get current running game
-    match list_games(&server_base_url).await {
+    match game_utils::list_games(&server_base_url).await {
         Ok(()) => {
             println!();
             println!("Please specify a game ID using the command-line interface with --gameid <id>");
-            return Ok(());
+            Ok(())
         },
         Err(_) => {
             // Fall back to trying to get current running game
-            let game_id = match get_game_id(&server_base_url).await {
+            let game_id = match game_utils::get_game_id(&server_base_url).await {
                 Ok(game_info) => {
                     if let Some(id) = game_info.split(',').next() {
                         println!("Using detected game: {}", id.trim());
@@ -151,10 +162,10 @@ pub async fn run_client_with_exit_flag_and_game_id(server_base_url: &str, game_i
     // Main game loop
     loop {
         // Retrieve and display current game state
-        let board_numbers = get_board_data(server_base_url, game_id).await?;
+        let board_numbers = api_client::get_board_data(server_base_url, game_id).await?;
 
         // Retrieve scorecard data first
-        let scorecard_data = get_scoremap(server_base_url, game_id).await?;
+        let scorecard_data = api_client::get_scoremap(server_base_url, game_id).await?;
 
         // Create a board for display purposes and recreate the proper state
         let mut display_board = Board::new();
@@ -171,7 +182,7 @@ pub async fn run_client_with_exit_flag_and_game_id(server_base_url: &str, game_i
         display_board.update_marked_numbers(numbers_to_highlight);
 
         // Retrieve pouch data
-        let pouch_data = get_pouch_data(server_base_url, game_id).await?;
+        let pouch_data = api_client::get_pouch_data(server_base_url, game_id).await?;
 
         // Display current state with client names resolved
         show_on_terminal_with_client_names(&display_board, &pouch_data, &scorecard_data, server_base_url, game_id).await;
@@ -194,7 +205,7 @@ pub async fn run_client_with_exit_flag_and_game_id(server_base_url: &str, game_i
             match terminal::wait_for_user_action() {
                 terminal::KeyAction::Extract => {
                     // Extract a number
-                    match extract_number(server_base_url, game_id).await {
+                    match api_client::extract_number(server_base_url, game_id, BOARD_ID).await {
                         Ok(_) => {
                             break true; // Continue main loop to refresh display
                         }
@@ -235,162 +246,6 @@ pub async fn run_client_with_exit_flag_and_game_id(server_base_url: &str, game_i
     Ok(())
 }
 
-async fn test_server_connection(server_base_url: &str) -> Result<(), Box<dyn Error>> {
-    let url = format!("{server_base_url}/gameslist");
-    let response = reqwest::get(&url).await?;
-
-    if response.status().is_success() {
-        Ok(())
-    } else {
-        Err(format!("Server returned status: {}", response.status()).into())
-    }
-}
-
-async fn get_board_data(server_base_url: &str, game_id: &str) -> Result<Vec<Number>, Box<dyn Error>> {
-    let url = format!("{server_base_url}/{game_id}/board");
-    let response = reqwest::get(&url).await?;
-
-    if response.status().is_success() {
-        let board: Board = response.json().await?;
-        Ok(board.get_numbers().clone())
-    } else {
-        Err(format!("Failed to get board data: {}", response.status()).into())
-    }
-}
-
-async fn get_pouch_data(server_base_url: &str, game_id: &str) -> Result<Vec<Number>, Box<dyn Error>> {
-    let url = format!("{server_base_url}/{game_id}/pouch");
-    let response = reqwest::get(&url).await?;
-
-    if response.status().is_success() {
-        let pouch: tombola::pouch::Pouch = response.json().await?;
-        Ok(pouch.numbers)
-    } else {
-        Err(format!("Server error: {}", response.status()).into())
-    }
-}
-
-async fn extract_number(server_base_url: &str, game_id: &str) -> Result<u8, Box<dyn Error>> {
-    let client = reqwest::Client::new();
-    let url = format!("{server_base_url}/{game_id}/extract");
-
-    let response = client
-        .post(&url)
-        .header("X-Client-ID", BOARD_ID) // Board client ID
-        .send()
-        .await?;
-
-    if response.status().is_success() {
-        let extract_response: serde_json::Value = response.json().await?;
-        if let Some(extracted_number) = extract_response["extracted_number"].as_u64() {
-            Ok(extracted_number as u8)
-        } else {
-            Err("Invalid response format from extract endpoint".into())
-        }
-    } else {
-        let status = response.status();
-        let error_text = response.text().await?;
-        Err(format!("Failed to extract number: {status} - {error_text}").into())
-    }
-}
-
-async fn get_scoremap(server_base_url: &str, game_id: &str) -> Result<tombola::score::ScoreCard, Box<dyn Error>> {
-    let url = format!("{server_base_url}/{game_id}/scoremap");
-    let response = reqwest::get(&url).await?;
-
-    if response.status().is_success() {
-        let scorecard: tombola::score::ScoreCard = response.json().await?;
-        Ok(scorecard)
-    } else {
-        Err(format!("Server error: {}", response.status()).into())
-    }
-}
-
-async fn get_game_id(server_base_url: &str) -> Result<String, Box<dyn Error>> {
-    let url = format!("{server_base_url}/gameslist");
-    let response = reqwest::get(&url).await?;
-
-    if response.status().is_success() {
-        let games_info: serde_json::Value = response.json().await?;
-
-        if let Some(games) = games_info["games"].as_array() {
-            // Find the first non-closed game
-            for game in games {
-                if let (Some(game_id), Some(status), Some(start_date)) = (
-                    game["game_id"].as_str(),
-                    game["status"].as_str(),
-                    game["start_date"].as_str()
-                ) {
-                    if status != "Closed" {
-                        return Ok(format!("{game_id}, started at: {start_date}"));
-                    }
-                }
-            }
-            Err("No available games found".into())
-        } else {
-            Err("Invalid response format from games list endpoint".into())
-        }
-    } else {
-        Err(format!("Server error: {}", response.status()).into())
-    }
-}
-
-async fn list_games(server_base_url: &str) -> Result<(), Box<dyn Error>> {
-    let url = format!("{server_base_url}/gameslist");
-    let response = reqwest::get(&url).await?;
-
-    if response.status().is_success() {
-        let games_info: serde_json::Value = response.json().await?;
-
-        if let Some(games) = games_info["games"].as_array() {
-            if games.is_empty() {
-                println!("No games found.");
-            } else {
-                println!("Available games:");
-                for game in games {
-                    if let (Some(game_id), Some(status), Some(start_date)) = (
-                        game["game_id"].as_str(),
-                        game["status"].as_str(),
-                        game["start_date"].as_str()
-                    ) {
-                        // Only show non-closed games
-                        if status != "Closed" {
-                            println!("  {game_id} - {status} (created: {start_date})");
-                        }
-                    }
-                }
-            }
-        } else {
-            println!("Invalid response format from games list endpoint.");
-        }
-        Ok(())
-    } else {
-        Err(format!("Server error: {}", response.status()).into())
-    }
-}
-
-async fn get_client_name_by_id(server_base_url: &str, client_id: &str) -> Result<String, Box<dyn Error>> {
-    // Handle special board client ID
-    if client_id == BOARD_ID {
-        return Ok("Board".to_string());
-    }
-
-    let url = format!("{server_base_url}/clientinfo/{client_id}");
-    let response = reqwest::get(&url).await?;
-
-    if response.status().is_success() {
-        let client_info: serde_json::Value = response.json().await?;
-        if let Some(name) = client_info["name"].as_str() {
-            Ok(name.to_string())
-        } else {
-            Ok("Unknown Client".to_string())
-        }
-    } else {
-        // Fallback to showing a user-friendly message if lookup fails
-        Ok("Unknown Client".to_string())
-    }
-}
-
 // Custom terminal display function that resolves client names for achievements
 async fn show_on_terminal_with_client_names(
     board: &Board,
@@ -407,9 +262,9 @@ async fn show_on_terminal_with_client_names(
     let extracted = board.get_numbers().last().copied().unwrap_or(0);
 
     println!("Last number: {}{extracted}{}", tombola::defs::Colors::green(), tombola::defs::Colors::reset());
-    println!("Previous numbers: {:?}", tombola::terminal::print_last_numbers(board, 3));
+    println!("Previous numbers: {:?}", terminal::print_last_numbers(board, 3));
     println!("\nCurrent board:");
-    tombola::terminal::print_board(board);
+    terminal::print_board(board);
     println!();
 
     // Print scorecard with client names resolved
@@ -435,7 +290,7 @@ async fn show_on_terminal_with_client_names(
                 if i > 0 { print!(", "); }
 
                 // Resolve client name
-                let client_name = match get_client_name_by_id(server_base_url, &achievement.client_id).await {
+                let client_name = match api_client::get_client_name_by_id(server_base_url, &achievement.client_id).await {
                     Ok(name) => name,
                     Err(_) => "Unknown Client".to_string(),
                 };
@@ -535,7 +390,7 @@ async fn run_client_with_args(args: Args) -> Result<(), Box<dyn Error>> {
     print!("Connecting to server at {server_base_url}...");
 
     // Test server connectivity first
-    match test_server_connection(&server_base_url).await {
+    match game_utils::test_server_connection(&server_base_url).await {
         Ok(_) => println!("Ok. ✓"),
         Err(e) => {
             eprintln!("Error. ✗ Failed to connect to server: {e}");
@@ -547,7 +402,7 @@ async fn run_client_with_args(args: Args) -> Result<(), Box<dyn Error>> {
 
     // Handle list games request
     if args.listgames {
-        return list_games(&server_base_url).await;
+        return game_utils::list_games(&server_base_url).await;
     }
 
     // Determine game_id
@@ -564,7 +419,7 @@ async fn run_client_with_args(args: Args) -> Result<(), Box<dyn Error>> {
         provided_game_id
     } else {
         // No game_id provided and not creating new game - show games list first
-        match list_games(&server_base_url).await {
+        match game_utils::list_games(&server_base_url).await {
             Ok(()) => {
                 println!();
                 println!("Please specify a game ID using --gameid <id> or create a new game with --newgame");
@@ -573,7 +428,7 @@ async fn run_client_with_args(args: Args) -> Result<(), Box<dyn Error>> {
             Err(e) => {
                 eprintln!("Failed to list games: {e}");
                 // Fall back to trying to get current running game as before
-                match get_game_id(&server_base_url).await {
+                match game_utils::get_game_id(&server_base_url).await {
                     Ok(game_info) => {
                         // Extract just the game_id from the formatted string
                         if let Some(id) = game_info.split(',').next() {
