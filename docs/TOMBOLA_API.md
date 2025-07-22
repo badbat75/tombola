@@ -272,6 +272,9 @@ Retrieve information about a registered client by client ID across all games.
 - These are **global** routes that search across all games in the GameRegistry
 - Returns information about clients regardless of which specific game they're registered to
 - Client data can span multiple games - same client can exist in multiple games
+- **Global Client IDs**: A client maintains the same ID across all games they join
+- The server uses a global client registry to ensure ID consistency
+- When a client registers to multiple games, they reuse their existing global client ID
 
 ### 4. Card Management (Game-Specific)
 
