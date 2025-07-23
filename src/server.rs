@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicBool;
 
@@ -24,7 +24,7 @@ struct ErrorResponse {
 pub struct AppState {
     pub game: Game,
     pub game_registry: GameRegistry,
-    pub global_client_registry: Arc<Mutex<ClientRegistry>>,
+    pub global_client_registry: ClientRegistry,
     pub config: ServerConfig,
 }
 
@@ -49,7 +49,7 @@ pub fn start_server(config: ServerConfig) -> (tokio::task::JoinHandle<()>, Arc<A
         let app_state = Arc::new(AppState {
             game,
             game_registry,
-            global_client_registry: Arc::new(Mutex::new(ClientRegistry::new())),
+            global_client_registry: ClientRegistry::new(),
             config: config.clone(),
         });
 

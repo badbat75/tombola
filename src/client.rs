@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
+use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
 // Board client ID constant used throughout the application for client operations
@@ -47,94 +48,161 @@ pub struct ClientInfo {
     pub name: String,
     pub client_type: String,
     pub registered_at: std::time::SystemTime,
+    pub email: String,  // Internal field, not exposed through APIs
 }
 
 impl ClientInfo {
-    // Generate a unique client ID based on name and client type
-    pub fn generate_client_id(name: &str, client_type: &str) -> String {
+    pub fn new(name: &str, client_type: &str, email: &str) -> Self {
+        // Generate a client ID based on name, type, and current time
         let mut hasher = DefaultHasher::new();
-
-        // Hash the client info with current timestamp for uniqueness
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-
+        
+        // Include name, type, and current time for uniqueness
         hasher.write(name.as_bytes());
         hasher.write(client_type.as_bytes());
-        hasher.write(&timestamp.to_be_bytes());
+        
+        // Use high-resolution timestamp for better uniqueness
+        if let Ok(duration) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            hasher.write(&duration.as_nanos().to_le_bytes());
+        }
+        
+        let hash = hasher.finish();
+        let client_id = format!("{:016X}", hash);
 
-        format!("{:016X}", hasher.finish())
+        ClientInfo {
+            id: client_id,
+            name: name.to_string(),
+            client_type: client_type.to_string(),
+            registered_at: std::time::SystemTime::now(),
+            email: email.to_string(),
+        }
     }
 
-    // Create a new ClientInfo with generated ID
-    pub fn new(name: impl Into<String>, client_type: impl Into<String>) -> Self {
-        let name = name.into();
-        let client_type = client_type.into();
-        let id = Self::generate_client_id(&name, &client_type);
-        ClientInfo {
-            id,
-            name,
-            client_type,
-            registered_at: std::time::SystemTime::now(),
-        }
+    pub fn client_id(&self) -> &str {
+        &self.id
     }
 }
 
-// Global client registry (keyed by client name)
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+// Unified client registry with internal thread safety (following GameRegistry model)
+#[derive(Debug)]
 pub struct ClientRegistry {
-    clients: HashMap<String, ClientInfo>,
+    clients: Arc<Mutex<HashMap<String, ClientInfo>>>,
 }
 
 impl ClientRegistry {
-    // Create a new empty registry
+    /// Create a new empty registry
     pub fn new() -> Self {
         Self {
-            clients: HashMap::new(),
+            clients: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    // Insert a client into the registry (only if no numbers have been extracted)
-    pub fn insert(&mut self, key: String, client: ClientInfo, numbers_extracted: bool) -> Result<Option<ClientInfo>, String> {
-        if numbers_extracted {
-            return Err("Cannot register new clients after numbers have been extracted".to_string());
-        }
-        Ok(self.clients.insert(key, client))
+    /// Insert a client into the registry (keyed by client ID)
+    /// Returns the previous client if one existed with the same ID, or an error message
+    pub fn insert(&self, client: ClientInfo) -> Result<Option<ClientInfo>, String> {
+        let mut clients_lock = self.clients.lock()
+            .map_err(|_| "Failed to lock client registry")?;
+        
+        Ok(clients_lock.insert(client.id.clone(), client))
     }
 
-    // Get a client by key
-    pub fn get(&self, key: &str) -> Option<&ClientInfo> {
-        self.clients.get(key)
-    }
-
-    // Get all clients
-    pub fn values(&self) -> std::collections::hash_map::Values<String, ClientInfo> {
-        self.clients.values()
-    }
-
-    // Check if registry is empty
-    pub fn is_empty(&self) -> bool {
-        self.clients.is_empty()
-    }
-
-    // Get number of clients
-    pub fn len(&self) -> usize {
-        self.clients.len()
-    }
-
-    // Helper function to get client name by client ID
-    pub fn get_client_name_by_id(&self, client_id: &str) -> Option<String> {
-        if client_id == BOARDCLIENT_ID {
-            return Some("Board".to_string());
-        }
-
-        for client_info in self.clients.values() {
-            if client_info.id == client_id {
-                return Some(client_info.name.to_string());
+    /// Get a client by client name (for global registry lookup)
+    pub fn get_by_name(&self, client_name: &str) -> Result<Option<ClientInfo>, String> {
+        let clients_lock = self.clients.lock()
+            .map_err(|_| "Failed to lock client registry")?;
+        
+        // Find client by name
+        for client in clients_lock.values() {
+            if client.name == client_name {
+                return Ok(Some(client.clone()));
             }
         }
-        None
+        
+        Ok(None)
+    }
+
+    /// Get a client by client ID
+    pub fn get(&self, client_id: &str) -> Result<Option<ClientInfo>, String> {
+        let clients_lock = self.clients.lock()
+            .map_err(|_| "Failed to lock client registry")?;
+        
+        Ok(clients_lock.get(client_id).cloned())
+    }
+
+    /// Get a client by client ID (alias for consistency)
+    pub fn get_by_client_id(&self, client_id: &str) -> Result<Option<ClientInfo>, String> {
+        self.get(client_id)
+    }
+
+    /// Get all clients as a vector (since we can't return iterator with lock)
+    pub fn get_all_clients(&self) -> Result<Vec<ClientInfo>, String> {
+        let clients_lock = self.clients.lock()
+            .map_err(|_| "Failed to lock client registry")?;
+        
+        Ok(clients_lock.values().cloned().collect())
+    }
+
+    /// Check if registry is empty
+    pub fn is_empty(&self) -> Result<bool, String> {
+        let clients_lock = self.clients.lock()
+            .map_err(|_| "Failed to lock client registry")?;
+        
+        Ok(clients_lock.is_empty())
+    }
+
+    /// Get number of clients
+    pub fn len(&self) -> Result<usize, String> {
+        let clients_lock = self.clients.lock()
+            .map_err(|_| "Failed to lock client registry")?;
+        
+        Ok(clients_lock.len())
+    }
+
+    /// Check if a client exists by client ID
+    pub fn contains_client(&self, client_id: &str) -> Result<bool, String> {
+        let clients_lock = self.clients.lock()
+            .map_err(|_| "Failed to lock client registry")?;
+        
+        Ok(clients_lock.contains_key(client_id))
+    }
+
+    /// Helper function to get client name by client ID
+    pub fn get_client_name_by_id(&self, client_id: &str) -> Result<Option<String>, String> {
+        if client_id == BOARDCLIENT_ID {
+            return Ok(Some("Board".to_string()));
+        }
+
+        let clients_lock = self.clients.lock()
+            .map_err(|_| "Failed to lock client registry")?;
+
+        Ok(clients_lock.get(client_id).map(|client| client.name.clone()))
+    }
+
+    /// Helper function to get client info by client ID
+    pub fn get_client_info_by_id(&self, client_id: &str) -> Result<Option<ClientInfo>, String> {
+        self.get(client_id)
+    }
+
+    /// Remove a client by client ID
+    pub fn remove(&self, client_id: &str) -> Result<Option<ClientInfo>, String> {
+        let mut clients_lock = self.clients.lock()
+            .map_err(|_| "Failed to lock client registry")?;
+        
+        Ok(clients_lock.remove(client_id))
+    }
+
+    /// Remove a client by client ID (alias for consistency)
+    pub fn remove_by_client_id(&self, client_id: &str) -> Result<Option<ClientInfo>, String> {
+        self.remove(client_id)
+    }
+
+    /// Clear all clients from the registry
+    pub fn clear(&self) -> Result<usize, String> {
+        let mut clients_lock = self.clients.lock()
+            .map_err(|_| "Failed to lock client registry")?;
+
+        let count = clients_lock.len();
+        clients_lock.clear();
+        Ok(count)
     }
 }
 
@@ -144,9 +212,9 @@ mod tests {
 
     #[test]
     fn test_client_info_generation() {
-        let client1 = ClientInfo::new("player1", "player");
-        let client2 = ClientInfo::new("player2", "player");
-        let client3 = ClientInfo::new("player1", "player"); // Same name, should get different ID
+        let client1 = ClientInfo::new("player1", "player", "player1@example.com");
+        let client2 = ClientInfo::new("player2", "player", "player2@example.com");
+        let client3 = ClientInfo::new("player1", "player", "player1@example.com"); // Same name, should get different ID
 
         // Each client should have a unique ID
         assert_ne!(client1.id, client2.id, "Different clients should have different IDs");
@@ -163,126 +231,74 @@ mod tests {
         // Names and types should be preserved
         assert_eq!(client1.name, "player1");
         assert_eq!(client1.client_type, "player");
-        assert_eq!(client2.name, "player2");
-        assert_eq!(client2.client_type, "player");
     }
 
     #[test]
-    fn test_client_registry_basic_operations() {
-        let mut registry = ClientRegistry::new();
+    fn test_client_registry_operations() {
+        let registry = ClientRegistry::new();
+        let client = ClientInfo::new("testplayer", "player", "test@example.com");
 
-        // Registry should start empty
-        assert_eq!(registry.len(), 0);
-        assert!(registry.is_empty());
+        // Should be able to register
+        let result = registry.insert(client.clone()).unwrap();
+        assert!(result.is_none(), "First insert should return None");
 
-        // Add a client
-        let client = ClientInfo::new("testplayer", "player");
-        let client_id = client.id.clone();
-        let client_name = client.name.clone();
-
-        let result = registry.insert(client_name.clone(), client, false);
-        assert!(result.is_ok(), "Should be able to insert client when no numbers extracted");
-
-        // Registry should now have one client
-        assert_eq!(registry.len(), 1);
-        assert!(!registry.is_empty());
-
-        // Should be able to retrieve the client
-        let retrieved_client = registry.get(&client_name);
-        assert!(retrieved_client.is_some(), "Should be able to retrieve inserted client");
-        assert_eq!(retrieved_client.unwrap().id, client_id);
-        assert_eq!(retrieved_client.unwrap().name, client_name);
-        assert_eq!(retrieved_client.unwrap().client_type, "player");
+        // Should return previous value when inserting same client ID
+        let new_client = ClientInfo::new("newplayer", "player", "new@example.com");
+        let updated_client = ClientInfo { 
+            id: client.id.clone(), 
+            name: new_client.name,
+            client_type: new_client.client_type,
+            registered_at: new_client.registered_at,
+            email: String::new(),  // Default empty email for test
+        };
+        let result = registry.insert(updated_client).unwrap();
+        assert!(result.is_some(), "Should return previous client when client ID exists");
     }
 
     #[test]
-    fn test_client_registry_registration_restrictions() {
-        let mut registry = ClientRegistry::new();
-        let client = ClientInfo::new("testplayer", "player");
+    fn test_client_registry_lookup() {
+        let registry = ClientRegistry::new();
+        let client = ClientInfo::new("testplayer", "player", "test@example.com");
 
-        // Should be able to register when no numbers extracted
-        let result = registry.insert("testplayer".to_string(), client.clone(), false);
-        assert!(result.is_ok(), "Should allow registration when no numbers extracted");
+        let _ = registry.insert(client.clone());
 
-        // Should not be able to register new clients after numbers extracted
-        let new_client = ClientInfo::new("newplayer", "player");
-        let result = registry.insert("newplayer".to_string(), new_client, true);
-        assert!(result.is_err(), "Should not allow registration after numbers extracted");
-        assert!(result.unwrap_err().contains("Cannot register new clients after numbers have been extracted"));
+        // Test lookup by client ID
+        let found = registry.get(&client.id).unwrap();
+        assert!(found.is_some(), "Should find client by ID");
+        assert_eq!(found.unwrap().name, "testplayer");
+
+        // Test contains_client
+        assert!(registry.contains_client(&client.id).unwrap(), "Should contain client");
+        assert!(!registry.contains_client("nonexistent").unwrap(), "Should not contain nonexistent client");
+
+        // Test get_client_name_by_id
+        let name = registry.get_client_name_by_id(&client.id).unwrap();
+        assert_eq!(name, Some("testplayer".to_string()));
+
+        // Test board client special case
+        let board_name = registry.get_client_name_by_id(BOARDCLIENT_ID).unwrap();
+        assert_eq!(board_name, Some("Board".to_string()));
     }
 
     #[test]
-    fn test_client_registry_get_client_name_by_id() {
-        let mut registry = ClientRegistry::new();
+    fn test_client_registry_collection_methods() {
+        let registry = ClientRegistry::new();
+        let client1 = ClientInfo::new("player1", "player", "player1@example.com");
+        let client2 = ClientInfo::new("player2", "player", "player2@example.com");
+        let client3 = ClientInfo::new("player3", "player", "player3@example.com");
 
-        // Test board client ID
-        let board_name = registry.get_client_name_by_id(BOARDCLIENT_ID);
-        assert_eq!(board_name, Some("Board".to_string()), "Should return 'Board' for board client ID");
+        let _ = registry.insert(client1);
+        let _ = registry.insert(client2);
+        let _ = registry.insert(client3);
 
-        // Add a regular client
-        let client = ClientInfo::new("testplayer", "player");
-        let client_id = client.id.clone();
-        let _ = registry.insert("testplayer".to_string(), client, false);
+        // Test collection methods
+        assert_eq!(registry.len().unwrap(), 3, "Registry should contain 3 clients");
+        assert!(!registry.is_empty().unwrap(), "Registry should not be empty");
 
-        // Should be able to find client by ID
-        let found_name = registry.get_client_name_by_id(&client_id);
-        assert_eq!(found_name, Some("testplayer".to_string()), "Should find client name by ID");
-
-        // Should return None for non-existent ID
-        let not_found = registry.get_client_name_by_id("NONEXISTENT");
-        assert_eq!(not_found, None, "Should return None for non-existent client ID");
-    }
-
-    #[test]
-    fn test_global_client_id_consistency() {
-        // Test that the same client name gets different IDs when created multiple times
-        // (this simulates what should happen when a client registers to multiple games)
-
-        let client1 = ClientInfo::new("sameplayer", "player");
-        let client2 = ClientInfo::new("sameplayer", "player");
-
-        // Different instances should have different IDs due to timestamp differences
-        assert_ne!(client1.id, client2.id, "Different instances should have different IDs");
-
-        // But both should have the same name and type
-        assert_eq!(client1.name, client2.name);
-        assert_eq!(client1.client_type, client2.client_type);
-
-        // This demonstrates why we need a global registry to reuse client IDs
-        // across games - without it, each registration would create a new ID
-    }
-
-    #[test]
-    fn test_client_registry_multiple_clients() {
-        let mut registry = ClientRegistry::new();
-
-        // Add multiple clients
-        let client1 = ClientInfo::new("player1", "player");
-        let client2 = ClientInfo::new("player2", "observer");
-        let client3 = ClientInfo::new("player3", "player");
-
-        let client1_id = client1.id.clone();
-        let client2_id = client2.id.clone();
-        let client3_id = client3.id.clone();
-
-        let _ = registry.insert("player1".to_string(), client1, false);
-        let _ = registry.insert("player2".to_string(), client2, false);
-        let _ = registry.insert("player3".to_string(), client3, false);
-
-        assert_eq!(registry.len(), 3, "Should have 3 clients");
-
-        // Test that we can find all clients by ID
-        assert_eq!(registry.get_client_name_by_id(&client1_id), Some("player1".to_string()));
-        assert_eq!(registry.get_client_name_by_id(&client2_id), Some("player2".to_string()));
-        assert_eq!(registry.get_client_name_by_id(&client3_id), Some("player3".to_string()));
-
-        // Test iteration over all clients
-        let mut client_ids: Vec<String> = registry.values().map(|c| c.id.clone()).collect();
-        client_ids.sort();
-
-        let mut expected_ids = vec![client1_id, client2_id, client3_id];
-        expected_ids.sort();
-
-        assert_eq!(client_ids, expected_ids, "Should be able to iterate over all clients");
+        let clients = registry.get_all_clients().unwrap();
+        let names: Vec<String> = clients.iter().map(|c| c.name.clone()).collect();
+        assert!(names.contains(&"player1".to_string()));
+        assert!(names.contains(&"player2".to_string()));
+        assert!(names.contains(&"player3".to_string()));
     }
 }

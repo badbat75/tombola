@@ -15,7 +15,8 @@ use serde::{Deserialize, Serialize};
 use crate::board::Board;
 use crate::pouch::Pouch;
 use crate::score::ScoreCard;
-use crate::client::ClientRegistry;
+use crate::logging::log_warning;
+use std::collections::HashSet;
 use crate::card::CardAssignmentManager;
 use crate::defs::Number;
 use crate::extraction::perform_extraction;
@@ -327,7 +328,7 @@ pub struct Game {
     board: Arc<Mutex<Board>>,
     pouch: Arc<Mutex<Pouch>>,
     scorecard: Arc<Mutex<ScoreCard>>,
-    client_registry: Arc<Mutex<ClientRegistry>>,
+    registered_clients: Arc<Mutex<HashSet<String>>>,  // Just store client IDs
     card_manager: Arc<Mutex<CardAssignmentManager>>,
 }
 
@@ -344,7 +345,7 @@ impl Game {
             board: Arc::new(Mutex::new(Board::new())),
             pouch: Arc::new(Mutex::new(Pouch::new())),
             scorecard: Arc::new(Mutex::new(ScoreCard::new())),
-            client_registry: Arc::new(Mutex::new(ClientRegistry::new())),
+            registered_clients: Arc::new(Mutex::new(HashSet::new())),
             card_manager: Arc::new(Mutex::new(CardAssignmentManager::new())),
         }
     }
@@ -387,9 +388,92 @@ impl Game {
         &self.scorecard
     }
 
-    /// Get a reference to the client registry Arc<Mutex<ClientRegistry>>
-    pub fn client_registry(&self) -> &Arc<Mutex<ClientRegistry>> {
-        &self.client_registry
+    /// Get a reference to the registered clients Arc<Mutex<HashSet<String>>>
+    pub fn registered_clients(&self) -> &Arc<Mutex<HashSet<String>>> {
+        &self.registered_clients
+    }
+
+    /// Get all registered client information from the global registry
+    pub fn get_registered_client_infos(&self, client_registry: &crate::client::ClientRegistry) -> Result<Vec<crate::client::ClientInfo>, String> {
+        let client_ids = if let Ok(clients) = self.registered_clients.lock() {
+            clients.iter().cloned().collect::<Vec<String>>()
+        } else {
+            return Err("Failed to lock registered clients".to_string());
+        };
+
+        let mut client_infos = Vec::new();
+        for client_id in client_ids {
+            match client_registry.get(&client_id) {
+                Ok(Some(client_info)) => client_infos.push(client_info),
+                Ok(None) => {
+                    // Client ID exists in game but not in global registry - this shouldn't happen
+                    log_warning(&format!("Client ID {} registered in game but not found in global registry", client_id));
+                }
+                Err(e) => {
+                    return Err(format!("Failed to get client info for {}: {}", client_id, e));
+                }
+            }
+        }
+        
+        Ok(client_infos)
+    }
+
+    /// Check if a specific client is registered and get their info
+    pub fn get_client_info(&self, client_id: &str, client_registry: &crate::client::ClientRegistry) -> Result<Option<crate::client::ClientInfo>, String> {
+        // First check if client is registered in this game
+        let is_registered = if let Ok(clients) = self.registered_clients.lock() {
+            clients.contains(client_id)
+        } else {
+            return Err("Failed to lock registered clients".to_string());
+        };
+
+        if !is_registered {
+            return Ok(None);
+        }
+
+        // Get client info from global registry
+        client_registry.get(client_id)
+    }
+
+    /// Get the count of registered clients
+    pub fn registered_client_count(&self) -> Result<usize, String> {
+        if let Ok(clients) = self.registered_clients.lock() {
+            Ok(clients.len())
+        } else {
+            Err("Failed to lock registered clients".to_string())
+        }
+    }
+
+    /// Get list of registered client IDs
+    pub fn get_registered_client_ids(&self) -> Result<Vec<String>, String> {
+        if let Ok(clients) = self.registered_clients.lock() {
+            Ok(clients.iter().cloned().collect())
+        } else {
+            Err("Failed to lock registered clients".to_string())
+        }
+    }
+
+    /// Add a client to this game (only if no numbers have been extracted)
+    pub fn add_client(&self, client_id: String) -> Result<bool, String> {
+        let numbers_extracted = self.has_game_started();
+        if numbers_extracted {
+            return Err("Cannot register new clients after numbers have been extracted".to_string());
+        }
+
+        if let Ok(mut clients) = self.registered_clients.lock() {
+            Ok(clients.insert(client_id))
+        } else {
+            Err("Failed to lock registered clients".to_string())
+        }
+    }
+
+    /// Check if a client is registered to this game
+    pub fn contains_client(&self, client_id: &str) -> bool {
+        if let Ok(clients) = self.registered_clients.lock() {
+            clients.contains(client_id)
+        } else {
+            false
+        }
     }
 
     /// Get a reference to the card manager Arc<Mutex<CardAssignmentManager>>
@@ -461,10 +545,10 @@ impl Game {
         self.is_bingo_reached() || self.is_pouch_empty()
     }
 
-    /// Get the number of registered players (excluding board client if any)
+    /// Get the number of registered players
     pub fn player_count(&self) -> usize {
-        if let Ok(registry) = self.client_registry.lock() {
-            registry.len()
+        if let Ok(clients) = self.registered_clients.lock() {
+            clients.len()
         } else {
             0
         }
@@ -577,9 +661,9 @@ impl Game {
             guard.clone()
         };
 
-        let client_registry = {
-            let guard = self.client_registry.lock()
-                .map_err(|_| "Failed to lock client registry")?;
+        let registered_clients = {
+            let guard = self.registered_clients.lock()
+                .map_err(|_| "Failed to lock registered clients")?;
             guard.clone()
         };
 
@@ -595,7 +679,7 @@ impl Game {
             board,
             pouch,
             scorecard,
-            client_registry,
+            registered_clients,
             card_manager,
             game_ended_at: SystemTime::now(),
         })
@@ -610,7 +694,7 @@ pub struct SerializableGameState {
     pub board: Board,
     pub pouch: Pouch,
     pub scorecard: ScoreCard,
-    pub client_registry: ClientRegistry,
+    pub registered_clients: HashSet<String>,
     pub card_manager: CardAssignmentManager,
     pub game_ended_at: SystemTime,
 }

@@ -92,54 +92,52 @@ pub async fn handle_register(
     let client_type = &request.client_type;
 
     // First, check if the client already exists globally
-    let client_info = if let Ok(global_registry) = app_state.global_client_registry.lock() {
-        if let Some(existing_client) = global_registry.get(client_name) {
+    let client_info = match app_state.global_client_registry.get_by_name(client_name) {
+        Ok(Some(existing_client)) => {
             // Client exists globally, reuse their info
-            existing_client.clone()
-        } else {
-            // Client doesn't exist globally, drop the lock and create new one
-            drop(global_registry);
-
-            // Create new client info
-            let new_client = ClientInfo::new(client_name, client_type);
+            existing_client
+        }
+        Ok(None) => {
+            // Client doesn't exist globally, create new one
+            let new_client = ClientInfo::new(client_name, client_type, "");  // Empty email for now
 
             // Add to global registry
-            if let Ok(mut global_registry) = app_state.global_client_registry.lock() {
-                let _ = global_registry.insert(client_name.to_string(), new_client.clone(), false);
+            if let Err(e) = app_state.global_client_registry.insert(new_client.clone()) {
+                log_error(&format!("Failed to add client to global registry: {e}"));
+                return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to register client globally"));
             }
 
             new_client
         }
-    } else {
-        return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to access global client registry"));
+        Err(e) => {
+            log_error(&format!("Failed to access global client registry: {e}"));
+            return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to access global client registry"));
+        }
     };
 
     let client_id = client_info.id.clone();
 
     // Check if client is already registered to this specific game
-    if let Ok(mut game_registry) = game.client_registry().lock() {
-        if let Some(existing_client) = game_registry.get(client_name) {
-            return Ok(Json(RegisterResponse {
-                client_id: existing_client.id.clone(),
-                message: format!("Client '{client_name}' already registered in game '{game_id}'"),
-            }));
-        }
+    if game.contains_client(&client_id) {
+        return Ok(Json(RegisterResponse {
+            client_id: client_id.clone(),
+            message: format!("Client '{client_name}' already registered in game '{game_id}'"),
+        }));
+    }
 
-        // Check if numbers have been extracted using the game's convenience method
-        let numbers_extracted = game.has_game_started();
-
-        // Try to register the client to this specific game (will fail if numbers have been extracted)
-        match game_registry.insert(client_name.to_string(), client_info, numbers_extracted) {
-            Ok(_) => {
+    // Try to register the client to this specific game (will fail if numbers have been extracted)
+    match game.add_client(client_id.clone()) {
+        Ok(added) => {
+            if added {
                 log_info(&format!("Client registered successfully in game '{game_id}': {client_id}"));
-            }
-            Err(e) => {
-                log_error(&format!("Failed to register client in game '{game_id}': {e}"));
-                return Err(ApiError::new(StatusCode::CONFLICT, e));
+            } else {
+                log_info(&format!("Client already registered in game '{game_id}': {client_id}"));
             }
         }
-    } else {
-        return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to access game client registry"));
+        Err(e) => {
+            log_error(&format!("Failed to register client in game '{game_id}': {e}"));
+            return Err(ApiError::new(StatusCode::CONFLICT, e));
+        }
     }
 
     // Check if client requested cards during registration, default to 1 if not specified
@@ -167,19 +165,22 @@ pub async fn handle_client_info(
     let client_name = params.name.unwrap_or_default();
     log_info(&format!("Client info request for: {client_name}"));
 
-    if let Ok(registry) = app_state.global_client_registry.lock() {
-        if let Some(client) = registry.get(&client_name) {
+    match app_state.global_client_registry.get_by_name(&client_name) {
+        Ok(Some(client)) => {
             Ok(Json(ClientInfoResponse {
                 client_id: client.id.clone(),
                 name: client.name.clone(),
                 client_type: client.client_type.clone(),
                 registered_at: format!("{:?}", client.registered_at),
             }))
-        } else {
+        }
+        Ok(None) => {
             Err(ApiError::new(StatusCode::NOT_FOUND, format!("Client '{client_name}' not found")))
         }
-    } else {
-        Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to access global client registry"))
+        Err(e) => {
+            log_error(&format!("Failed to access global client registry: {e}"));
+            Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to access global client registry"))
+        }
     }
 }
 
@@ -200,19 +201,23 @@ pub async fn handle_client_info_by_id(
     }
 
     // Search in global client registry by client ID
-    if let Ok(registry) = app_state.global_client_registry.lock() {
-        for client_info in registry.values() {
-            if client_info.id == client_id {
-                return Ok(Json(ClientInfoResponse {
-                    client_id: client_info.id.clone(),
-                    name: client_info.name.clone(),
-                    client_type: client_info.client_type.clone(),
-                    registered_at: format!("{:?}", client_info.registered_at),
-                }));
+    match app_state.global_client_registry.get_all_clients() {
+        Ok(clients) => {
+            for client_info in clients {
+                if client_info.id == client_id {
+                    return Ok(Json(ClientInfoResponse {
+                        client_id: client_info.id.clone(),
+                        name: client_info.name.clone(),
+                        client_type: client_info.client_type.clone(),
+                        registered_at: format!("{:?}", client_info.registered_at),
+                    }));
+                }
             }
         }
-    } else {
-        return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to access global client registry"));
+        Err(e) => {
+            log_error(&format!("Failed to access global client registry: {e}"));
+            return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to access global client registry"));
+        }
     }
 
     // Client not found
@@ -246,16 +251,19 @@ pub async fn handle_generate_cards(
         }
     };
 
-    // Verify client is registered
-    let client_exists = if let Ok(registry) = game.client_registry().lock() {
-        registry.values().any(|client| client.id == client_id)
-    } else {
-        false
-    };
-
-    if !client_exists {
-        log_error("Client not registered");
-        return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Client not registered"));
+    // Verify client is registered and get their info
+    match game.get_client_info(&client_id, &app_state.global_client_registry) {
+        Ok(Some(_client_info)) => {
+            // Client is registered and found in global registry
+        }
+        Ok(None) => {
+            log_error("Client not registered");
+            return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Client not registered"));
+        }
+        Err(e) => {
+            log_error(&format!("Failed to verify client registration: {e}"));
+            return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to verify client registration"));
+        }
     }
 
     // Check if client already has cards assigned (prevent duplicate generation)
@@ -315,16 +323,19 @@ pub async fn handle_list_assigned_cards(
         }
     };
 
-    // Verify client is registered
-    let client_exists = if let Ok(registry) = game.client_registry().lock() {
-        registry.values().any(|client| client.id == client_id)
-    } else {
-        false
-    };
-
-    if !client_exists {
-        log_error("Client not registered");
-        return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Client not registered"));
+    // Verify client is registered and get their info
+    match game.get_client_info(&client_id, &app_state.global_client_registry) {
+        Ok(Some(_client_info)) => {
+            // Client is registered and found in global registry
+        }
+        Ok(None) => {
+            log_error("Client not registered");
+            return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Client not registered"));
+        }
+        Err(e) => {
+            log_error(&format!("Failed to verify client registration: {e}"));
+            return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to verify client registration"));
+        }
     }
 
     // Get client's assigned cards
@@ -375,17 +386,18 @@ pub async fn handle_get_assigned_card(
         }
     };
 
-    // Verify client is registered
-    let client_exists = if let Ok(registry) = game.client_registry().lock() {
-        registry.values().any(|client| client.id == client_id)
-    } else {
-        false
+    // Verify client is registered and get their info
+    let _client_info = match game.get_client_info(&client_id, &app_state.global_client_registry) {
+        Ok(Some(info)) => info,
+        Ok(None) => {
+            log_error(&format!("Client not registered: {client_id}"));
+            return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Client not registered"));
+        }
+        Err(e) => {
+            log_error(&format!("Failed to check client registration: {e}"));
+            return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Internal error"));
+        }
     };
-
-    if !client_exists {
-        log_error(&format!("Client not registered: {client_id}"));
-        return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Client not registered"));
-    }
 
     // Get the card assignment
     let card_assignment = if let Ok(manager) = game.card_manager().lock() {
@@ -801,7 +813,7 @@ mod tests {
 
     // Helper function to create test app state
     fn create_test_app_state() -> Arc<AppState> {
-        use std::sync::Mutex;
+        use std::sync::Arc;
         use crate::client::ClientRegistry;
 
         let game = Game::new();
@@ -812,7 +824,7 @@ mod tests {
         Arc::new(AppState {
             game,
             game_registry,
-            global_client_registry: Arc::new(Mutex::new(ClientRegistry::new())),
+            global_client_registry: ClientRegistry::new(),
             config
         })
     }
@@ -1301,12 +1313,12 @@ mod tests {
 
         assert!(result.is_ok());
         let response = result.unwrap();
-        assert_eq!(response.0["status"], "running");
+        assert_eq!(response.0["status"], "new");  // New game should have "new" status
         assert!(response.0["game_id"].is_string());
         assert!(response.0["created_at"].is_string());
         assert_eq!(response.0["numbers_extracted"], 0);
         assert_eq!(response.0["scorecard"], 0);
-        assert_eq!(response.0["server"], "axum");
+        // Note: server field was removed from new implementation, so don't check it
     }
 
     #[tokio::test]

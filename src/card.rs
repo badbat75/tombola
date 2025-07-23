@@ -577,9 +577,11 @@ impl CardAssignmentManager {
         }
 
         if let Some(assignment) = self.get_card_assignment(card_id) {
-            for client_info in client_registry.values() {
-                if client_info.id == assignment.client_id {
-                    return client_info.name.to_string();
+            if let Ok(clients) = client_registry.get_all_clients() {
+                for client_info in clients {
+                    if client_info.id == assignment.client_id {
+                        return client_info.name.to_string();
+                    }
                 }
             }
         }
