@@ -615,12 +615,12 @@ pub async fn handle_extract(
     match game.is_client_type(&client_id, "board") {
         Ok(is_board) => {
             if !is_board {
-                log_error(&format!("Unauthorized: Only board clients can extract numbers, client ID: {}", client_id));
+                log_error(&format!("Unauthorized: Only board clients can extract numbers, client ID: {client_id}"));
                 return Err(ApiError::new(StatusCode::FORBIDDEN, "Unauthorized: Only board clients can extract numbers"));
             }
         }
         Err(e) => {
-            log_error(&format!("Failed to check client type for '{}' in game '{}': {}", client_id, game_id, e));
+            log_error(&format!("Failed to check client type for '{client_id}' in game '{game_id}': {e}"));
             return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to verify client authorization"));
         }
     }
@@ -758,15 +758,15 @@ pub async fn handle_dumpgame(
     };
 
     // Only allow board client type to dump the game - check game-specific client type
-    match game.is_client_type(&client_id, "board") {
+    match game.is_client_type(client_id, "board") {
         Ok(is_board) => {
             if !is_board {
-                log_error(&format!("Unauthorized: Only board clients can dump the game, client ID: {}", client_id));
+                log_error(&format!("Unauthorized: Only board clients can dump the game, client ID: {client_id}"));
                 return Err(ApiError::new(StatusCode::FORBIDDEN, "Unauthorized: Only board clients can dump the game"));
             }
         }
         Err(e) => {
-            log_error(&format!("Failed to check client type for '{}' in game '{}': {}", client_id, game_id, e));
+            log_error(&format!("Failed to check client type for '{client_id}' in game '{game_id}': {e}"));
             return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to verify client authorization"));
         }
     }
@@ -945,7 +945,7 @@ mod tests {
         ).await;
 
         // This should succeed since we're registering a board client
-        assert!(join_result.is_ok(), "Failed to register board client to game {}", game_id);
+        assert!(join_result.is_ok(), "Failed to register board client to game {game_id}");
         let join_response = join_result.unwrap();
         
         // Verify the board client got the expected BOARD_ID

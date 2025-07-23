@@ -52,7 +52,7 @@ impl ClientInfo {
         }
         
         let hash = hasher.finish();
-        let client_id = format!("{:016X}", hash);
+        let client_id = format!("{hash:016X}");
 
         ClientInfo {
             id: client_id,
@@ -72,6 +72,12 @@ impl ClientInfo {
 #[derive(Debug)]
 pub struct ClientRegistry {
     clients: Arc<Mutex<HashMap<String, ClientInfo>>>,
+}
+
+impl Default for ClientRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ClientRegistry {

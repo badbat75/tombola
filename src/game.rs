@@ -37,6 +37,12 @@ pub struct GameClientTypeRegistry {
     client_types: Arc<Mutex<HashMap<String, String>>>,
 }
 
+impl Default for GameClientTypeRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GameClientTypeRegistry {
     /// Create a new empty client type registry
     pub fn new() -> Self {
@@ -89,7 +95,7 @@ impl GameClientTypeRegistry {
         let types_lock = self.client_types.lock()
             .map_err(|_| "Failed to lock client types registry")?;
         
-        Ok(types_lock.get(client_id).map_or(false, |ctype| ctype == client_type))
+        Ok(types_lock.get(client_id).is_some_and(|ctype| ctype == client_type))
     }
 
     /// Get all client type associations in this game
@@ -507,10 +513,10 @@ impl Game {
                 Ok(Some(client_info)) => client_infos.push(client_info),
                 Ok(None) => {
                     // Client ID exists in game but not in global registry - this shouldn't happen
-                    log_warning(&format!("Client ID {} registered in game but not found in global registry", client_id));
+                    log_warning(&format!("Client ID {client_id} registered in game but not found in global registry"));
                 }
                 Err(e) => {
-                    return Err(format!("Failed to get client info for {}: {}", client_id, e));
+                    return Err(format!("Failed to get client info for {client_id}: {e}"));
                 }
             }
         }

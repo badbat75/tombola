@@ -170,7 +170,7 @@ pub async fn run_client_with_exit_flag_and_game_id(server_base_url: &str, game_i
         .timeout(std::time::Duration::from_secs(30))
         .build()?;
     
-    println!("🔗 Registering board client '{}' with game '{}'...", client_name, game_id);
+    println!("🔗 Registering board client '{client_name}' with game '{game_id}'...");
     
     let register_response = registration::join_client(
         server_base_url,
