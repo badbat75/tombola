@@ -23,22 +23,22 @@ pub struct ScoreCard {
 }
 
 impl ScoreCard {
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         ScoreCard {
             published_score: 0,
             score_map: HashMap::new(),
         }
     }
 
-    pub fn get_scorecard(&self) -> Number {
+    #[must_use] pub fn get_scorecard(&self) -> Number {
         self.published_score
     }
 
-    pub fn get_scoremap(&self) -> &HashMap<Number, Vec<ScoreAchievement>> {
+    #[must_use] pub fn get_scoremap(&self) -> &HashMap<Number, Vec<ScoreAchievement>> {
         &self.score_map
     }
 
-    pub fn with_score(score: Number) -> Self {
+    #[must_use] pub fn with_score(score: Number) -> Self {
         ScoreCard {
             published_score: score,
             score_map: HashMap::new()
@@ -53,7 +53,7 @@ impl ScoreCard {
         self.score_map.insert(score_idx, achievements);
     }
 
-    pub fn allcards_calculate_score(&self, board_numbers: &[Number], card_assignments: &std::collections::HashMap<String, crate::card::CardAssignment>) -> (Number, Vec<(String, Vec<Number>)>) {
+    #[must_use] pub fn allcards_calculate_score(&self, board_numbers: &[Number], card_assignments: &std::collections::HashMap<String, crate::card::CardAssignment>) -> (Number, Vec<(String, Vec<Number>)>) {
         let mut card_details = Vec::new();
         let current_published_score = self.published_score; // Get the current published score value
         let mut global_score = 0;
@@ -150,7 +150,7 @@ impl ScoreCard {
         }
     }
 
-    pub fn board_calculate_score(&self, board_numbers: &[Number]) -> (Number, Vec<Number>) {
+    #[must_use] pub fn board_calculate_score(&self, board_numbers: &[Number]) -> (Number, Vec<Number>) {
         // Calculate score based on the last extracted number
         if let Some(&last_number) = board_numbers.last() {
             self.board_score_check(board_numbers, last_number)
@@ -159,7 +159,7 @@ impl ScoreCard {
         }
     }
 
-    pub fn board_score_check(&self, board_numbers: &[Number], extracted: Number) -> (Number, Vec<Number>) {
+    #[must_use] pub fn board_score_check(&self, board_numbers: &[Number], extracted: Number) -> (Number, Vec<Number>) {
         // Calculate score based on the last extracted number
         let numbers_per_row = (BOARDCONFIG.cols_per_card * BOARDCONFIG.cards_per_row) as i8;
 
@@ -366,7 +366,7 @@ impl ScoreCard {
                             bingo_achievements.push(ScoreAchievement {
                                 client_id: client_id.to_string(),
                                 card_id: board_card_id(),
-                                numbers: board_numbers_contributing.to_vec(),
+                                numbers: board_numbers_contributing.clone(),
                             });
                         }
                     }
@@ -396,7 +396,7 @@ impl ScoreCard {
                                             ScoreAchievement {
                                                 client_id: card_manager.get_client_id_for_card(card_id),
                                                 card_id: card_id.to_string(),
-                                                numbers: numbers.to_vec(),
+                                                numbers: numbers.clone(),
                                             }
                                         }).collect();
 
@@ -406,7 +406,7 @@ impl ScoreCard {
                                             achievements.push(ScoreAchievement {
                                                 client_id: client_id.to_string(),
                                                 card_id: board_card_id(),
-                                                numbers: board_numbers_contributing.to_vec(),
+                                                numbers: board_numbers_contributing.clone(),
                                             });
                                         }
                                     }
@@ -417,7 +417,7 @@ impl ScoreCard {
                                         vec![ScoreAchievement {
                                             client_id: client_id.to_string(),
                                             card_id: board_card_id(),
-                                            numbers: board_numbers_contributing.to_vec(),
+                                            numbers: board_numbers_contributing.clone(),
                                         }]
                                     } else {
                                         Vec::new()

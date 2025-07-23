@@ -37,7 +37,7 @@ use clap::Parser;
 use tombola::clients::{common, game_utils, api_client, card_management};
 mod registration;
 
-use common::*;
+use common::{GenerateCardsResponse, ListAssignedCardsResponse, CardInfo, AssignedCardInfo};
 
 #[derive(Parser)]
 #[command(name = env!("CARGO_BIN_NAME"))]
@@ -79,7 +79,7 @@ pub struct TombolaClient {
 
 impl TombolaClient {
     /// Create a new Tombola client
-    pub fn new(name: &str, server_url: &str) -> Self {
+    #[must_use] pub fn new(name: &str, server_url: &str) -> Self {
         let http_client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
@@ -142,7 +142,7 @@ impl TombolaClient {
     }
 
     /// Get the current game ID
-    pub fn current_game_id(&self) -> Option<&String> {
+    #[must_use] pub fn current_game_id(&self) -> Option<&String> {
         self.game_id.as_ref()
     }
 
@@ -152,12 +152,12 @@ impl TombolaClient {
     }
 
     /// Get the client ID (must be registered first)
-    pub fn get_client_id(&self) -> Option<&String> {
+    #[must_use] pub fn get_client_id(&self) -> Option<&String> {
         self.client_id.as_ref()
     }
 
     /// Check if client is registered
-    pub fn is_registered(&self) -> bool {
+    #[must_use] pub fn is_registered(&self) -> bool {
         self.registered
     }
 
@@ -267,10 +267,10 @@ impl TombolaClient {
 
     /// Ensure the client is registered before making requests
     fn ensure_registered(&self) -> Result<(), Box<dyn std::error::Error>> {
-        if !self.registered {
-            Err("Client not registered. Call register() first.".into())
-        } else {
+        if self.registered {
             Ok(())
+        } else {
+            Err("Client not registered. Call register() first.".into())
         }
     }
 }
@@ -382,10 +382,10 @@ async fn main() {
                 // Get the current board (extracted numbers) from the server
                 let extracted_numbers = match client.get_board().await {
                     Ok(board) => {
-                        if !board.is_empty() {
-                            println!("🎯 Extracted numbers ({}): {:?}", board.len(), board);
-                        } else {
+                        if board.is_empty() {
                             println!("🎯 No numbers extracted yet");
+                        } else {
+                            println!("🎯 Extracted numbers ({}): {:?}", board.len(), board);
                         }
                         board
                     },
@@ -543,7 +543,7 @@ fn print_card_as_table_with_highlights(card_number: usize, card_id: &str, card_d
     // Display card numbers, highlighting extracted ones and emphasizing highest score contributors
     let mut all_card_numbers = Vec::new();
 
-    for row in card_data.iter() {
+    for row in card_data {
         print!("│");
 
         for cell in row {

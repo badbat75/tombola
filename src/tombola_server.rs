@@ -20,7 +20,7 @@ async fn main() {
 
     // Simple main loop - wait for the server to finish or Ctrl+C
     match server_handle.await {
-        Ok(_) => log_info("API server stopped successfully."),
+        Ok(()) => log_info("API server stopped successfully."),
         Err(e) => log_error(&format!("Error waiting for server shutdown: {e:?}")),
     }
 }

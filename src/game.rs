@@ -33,7 +33,7 @@ pub struct GameClientType {
 /// Manages client types within a specific game context
 #[derive(Debug, Clone)]
 pub struct GameClientTypeRegistry {
-    /// HashMap mapping client_id -> client_type for this specific game
+    /// `HashMap` mapping `client_id` -> `client_type` for this specific game
     client_types: Arc<Mutex<HashMap<String, String>>>,
 }
 
@@ -45,7 +45,7 @@ impl Default for GameClientTypeRegistry {
 
 impl GameClientTypeRegistry {
     /// Create a new empty client type registry
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         Self {
             client_types: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -137,8 +137,8 @@ pub enum GameStatus {
 }
 
 impl GameStatus {
-    /// Convert GameStatus to a string representation
-    pub fn as_str(&self) -> &'static str {
+    /// Convert `GameStatus` to a string representation
+    #[must_use] pub fn as_str(&self) -> &'static str {
         match self {
             GameStatus::New => "New",
             GameStatus::Active => "Active",
@@ -162,7 +162,7 @@ pub struct GameEntry {
 
 impl GameEntry {
     /// Create a new game entry
-    pub fn new(game_id: String, game: Arc<Game>) -> Self {
+    #[must_use] pub fn new(game_id: String, game: Arc<Game>) -> Self {
         Self {
             game_id,
             game,
@@ -172,7 +172,7 @@ impl GameEntry {
     }
 
     /// Get the current status of this game
-    pub fn status(&self) -> GameStatus {
+    #[must_use] pub fn status(&self) -> GameStatus {
         if self.game.is_bingo_reached() {
             GameStatus::Closed
         } else if self.game.has_game_started() {
@@ -182,16 +182,16 @@ impl GameEntry {
         }
     }
 
-    /// Update the closed_at timestamp if the game is closed
-    /// This should be called when checking status to ensure closed_at is properly set
+    /// Update the `closed_at` timestamp if the game is closed
+    /// This should be called when checking status to ensure `closed_at` is properly set
     pub fn update_closed_at(&mut self) {
         if self.game.is_bingo_reached() && self.closed_at.is_none() {
             self.closed_at = Some(SystemTime::now());
         }
     }
 
-    /// Get the status and update closed_at if necessary
-    /// This is a convenience method that combines status checking with closed_at updating
+    /// Get the status and update `closed_at` if necessary
+    /// This is a convenience method that combines status checking with `closed_at` updating
     pub fn status_with_update(&mut self) -> GameStatus {
         let status = self.status();
         if status == GameStatus::Closed && self.closed_at.is_none() {
@@ -201,12 +201,12 @@ impl GameEntry {
     }
 
     /// Check if the game is closed
-    pub fn is_closed(&self) -> bool {
+    #[must_use] pub fn is_closed(&self) -> bool {
         self.game.is_bingo_reached()
     }
 
-    /// Get the closed_at time as a human-readable string
-    pub fn closed_at_string(&self) -> Option<String> {
+    /// Get the `closed_at` time as a human-readable string
+    #[must_use] pub fn closed_at_string(&self) -> Option<String> {
         self.closed_at.map(|closed_at| {
             match closed_at.duration_since(std::time::UNIX_EPOCH) {
                 Ok(duration) => {
@@ -220,7 +220,7 @@ impl GameEntry {
     }
 
     /// Get game info as a formatted string
-    pub fn info(&self) -> String {
+    #[must_use] pub fn info(&self) -> String {
         let closed_info = match self.closed_at_string() {
             Some(closed_time) => format!(", closed_at={closed_time}"),
             None => String::new(),
@@ -284,13 +284,13 @@ impl GameEntry {
 /// ```
 #[derive(Debug)]
 pub struct GameRegistry {
-    /// HashMap storing game entries by game ID
+    /// `HashMap` storing game entries by game ID
     games: Arc<Mutex<HashMap<String, GameEntry>>>,
 }
 
 impl GameRegistry {
     /// Create a new empty game registry
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         Self {
             games: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -316,7 +316,7 @@ impl GameRegistry {
     }
 
     /// Get a list of all registered games with their status
-    /// Returns a vector of tuples: (game_id, status, game_info)
+    /// Returns a vector of tuples: (`game_id`, status, `game_info`)
     pub fn games_list(&self) -> Result<Vec<(String, GameStatus, String)>, String> {
         let mut games_lock = self.games.lock()
             .map_err(|_| "Failed to lock games registry")?;
@@ -439,7 +439,7 @@ pub struct Game {
 
 impl Game {
     /// Create a new Game instance with all components initialized
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         // Generate a random game ID
         let mut rng = rand::rng();
         let game_id = format!("game_{:08x}", rng.random::<u32>());
@@ -457,12 +457,12 @@ impl Game {
     }
 
     /// Get the game ID
-    pub fn id(&self) -> String {
+    #[must_use] pub fn id(&self) -> String {
         self.id.lock().unwrap().clone()
     }
 
     /// Get the game creation time
-    pub fn created_at(&self) -> SystemTime {
+    #[must_use] pub fn created_at(&self) -> SystemTime {
         *self.created_at.lock().unwrap()
     }
 
@@ -480,22 +480,22 @@ impl Game {
     }
 
     /// Get a reference to the board Arc<Mutex<Board>>
-    pub fn board(&self) -> &Arc<Mutex<Board>> {
+    #[must_use] pub fn board(&self) -> &Arc<Mutex<Board>> {
         &self.board
     }
 
     /// Get a reference to the pouch Arc<Mutex<Pouch>>
-    pub fn pouch(&self) -> &Arc<Mutex<Pouch>> {
+    #[must_use] pub fn pouch(&self) -> &Arc<Mutex<Pouch>> {
         &self.pouch
     }
 
     /// Get a reference to the scorecard Arc<Mutex<ScoreCard>>
-    pub fn scorecard(&self) -> &Arc<Mutex<ScoreCard>> {
+    #[must_use] pub fn scorecard(&self) -> &Arc<Mutex<ScoreCard>> {
         &self.scorecard
     }
 
-    /// Get a reference to the registered clients Arc<Mutex<HashSet<String>>>
-    pub fn registered_clients(&self) -> &Arc<Mutex<HashSet<String>>> {
+    /// Get a reference to the registered clients Arc<Mutex<`HashSet`<String>>>
+    #[must_use] pub fn registered_clients(&self) -> &Arc<Mutex<HashSet<String>>> {
         &self.registered_clients
     }
 
@@ -574,7 +574,7 @@ impl Game {
     }
 
     /// Check if a client is registered to this game
-    pub fn contains_client(&self, client_id: &str) -> bool {
+    #[must_use] pub fn contains_client(&self, client_id: &str) -> bool {
         if let Ok(clients) = self.registered_clients.lock() {
             clients.contains(client_id)
         } else {
@@ -615,7 +615,7 @@ impl Game {
     }
 
     /// Get a reference to the card manager Arc<Mutex<CardAssignmentManager>>
-    pub fn card_manager(&self) -> &Arc<Mutex<CardAssignmentManager>> {
+    #[must_use] pub fn card_manager(&self) -> &Arc<Mutex<CardAssignmentManager>> {
         &self.card_manager
     }
 
@@ -633,7 +633,7 @@ impl Game {
     }
 
     /// Check if the game has started (any numbers extracted)
-    pub fn has_game_started(&self) -> bool {
+    #[must_use] pub fn has_game_started(&self) -> bool {
         if let Ok(board) = self.board.lock() {
             !board.is_empty()
         } else {
@@ -643,7 +643,7 @@ impl Game {
     }
 
     /// Get the current board length (number of extracted numbers)
-    pub fn board_length(&self) -> usize {
+    #[must_use] pub fn board_length(&self) -> usize {
         if let Ok(board) = self.board.lock() {
             board.len()
         } else {
@@ -652,7 +652,7 @@ impl Game {
     }
 
     /// Get the current published score from the scorecard
-    pub fn published_score(&self) -> Number {
+    #[must_use] pub fn published_score(&self) -> Number {
         if let Ok(scorecard) = self.scorecard.lock() {
             scorecard.published_score
         } else {
@@ -661,12 +661,12 @@ impl Game {
     }
 
     /// Check if BINGO has been reached (game over condition)
-    pub fn is_bingo_reached(&self) -> bool {
+    #[must_use] pub fn is_bingo_reached(&self) -> bool {
         self.published_score() >= 15
     }
 
     /// Get the number of remaining numbers in the pouch
-    pub fn pouch_length(&self) -> usize {
+    #[must_use] pub fn pouch_length(&self) -> usize {
         if let Ok(pouch) = self.pouch.lock() {
             pouch.len()
         } else {
@@ -675,17 +675,17 @@ impl Game {
     }
 
     /// Check if the pouch is empty
-    pub fn is_pouch_empty(&self) -> bool {
+    #[must_use] pub fn is_pouch_empty(&self) -> bool {
         self.pouch_length() == 0
     }
 
     /// Check if the game has ended (either BINGO reached or pouch empty)
-    pub fn is_game_ended(&self) -> bool {
+    #[must_use] pub fn is_game_ended(&self) -> bool {
         self.is_bingo_reached() || self.is_pouch_empty()
     }
 
     /// Get the number of registered players
-    pub fn player_count(&self) -> usize {
+    #[must_use] pub fn player_count(&self) -> usize {
         if let Ok(clients) = self.registered_clients.lock() {
             clients.len()
         } else {
@@ -694,7 +694,7 @@ impl Game {
     }
 
     /// Get the total number of cards assigned in this game
-    pub fn card_count(&self) -> usize {
+    #[must_use] pub fn card_count(&self) -> usize {
         if let Ok(manager) = self.card_manager.lock() {
             manager.get_all_assignments().len()
         } else {
@@ -703,7 +703,7 @@ impl Game {
     }
 
     /// Get the current game status
-    pub fn status(&self) -> GameStatus {
+    #[must_use] pub fn status(&self) -> GameStatus {
         if self.is_bingo_reached() {
             GameStatus::Closed
         } else if self.has_game_started() {
@@ -714,7 +714,7 @@ impl Game {
     }
 
     /// Get running game ID and creation details
-    pub fn get_running_game_info(&self) -> (String, String, SystemTime) {
+    #[must_use] pub fn get_running_game_info(&self) -> (String, String, SystemTime) {
         (
             self.id().to_string(),
             self.created_at_string(),
@@ -723,7 +723,7 @@ impl Game {
     }
 
     /// Get game information as a formatted string for debugging/logging
-    pub fn game_info(&self) -> String {
+    #[must_use] pub fn game_info(&self) -> String {
         format!(
             "Game[id={}, created={}, board_len={}, pouch_len={}, score={}, started={}]",
             self.id(),
@@ -766,7 +766,7 @@ impl Game {
 
         // Write to file
         match fs::write(&filepath, json_content) {
-            Ok(_) => Ok(format!("Game dumped to: {}", filepath.display())),
+            Ok(()) => Ok(format!("Game dumped to: {}", filepath.display())),
             Err(e) => Err(format!("Failed to write file {filepath:?}: {e}")),
         }
     }

@@ -70,7 +70,7 @@ fn extract_highest_achievement_numbers(scorecard: &tombola::score::ScoreCard) ->
     let mut board_client_numbers = Vec::new();
 
     // Find the board client's highest achievement
-    for (score_level, achievements) in score_map.iter() {
+    for (score_level, achievements) in score_map {
         for achievement in achievements {
             if achievement.card_id == BOARD_ID && *score_level > board_client_highest_score {
                 board_client_highest_score = *score_level;
@@ -95,30 +95,27 @@ pub async fn run_client() -> Result<(), Box<dyn Error>> {
     let default_client_name = config.client_name.clone();
 
     // Try to show games list first, then fall back to get current running game
-    match game_utils::list_games(&server_base_url).await {
-        Ok(()) => {
-            println!();
-            println!("Please specify a game ID using the command-line interface with --gameid <id>");
-            Ok(())
-        },
-        Err(_) => {
-            // Fall back to trying to get current running game
-            let game_id = match game_utils::get_game_id(&server_base_url).await {
-                Ok(game_info) => {
-                    if let Some(id) = game_info.split(',').next() {
-                        println!("Using detected game: {}", id.trim());
-                        id.trim().to_string()
-                    } else {
-                        return Err("Failed to extract game ID from response".into());
-                    }
-                },
-                Err(e) => {
-                    return Err(format!("No running game found: {e}").into());
+    if let Ok(()) = game_utils::list_games(&server_base_url).await {
+        println!();
+        println!("Please specify a game ID using the command-line interface with --gameid <id>");
+        Ok(())
+    } else {
+        // Fall back to trying to get current running game
+        let game_id = match game_utils::get_game_id(&server_base_url).await {
+            Ok(game_info) => {
+                if let Some(id) = game_info.split(',').next() {
+                    println!("Using detected game: {}", id.trim());
+                    id.trim().to_string()
+                } else {
+                    return Err("Failed to extract game ID from response".into());
                 }
-            };
+            },
+            Err(e) => {
+                return Err(format!("No running game found: {e}").into());
+            }
+        };
 
-            run_client_with_game_id(&server_base_url, &game_id, &default_client_name).await
-        }
+        run_client_with_game_id(&server_base_url, &game_id, &default_client_name).await
     }
 }
 
@@ -129,30 +126,27 @@ pub async fn run_client_once() -> Result<(), Box<dyn Error>> {
     let default_client_name = config.client_name.clone();
 
     // Try to show games list first, then fall back to get current running game
-    match game_utils::list_games(&server_base_url).await {
-        Ok(()) => {
-            println!();
-            println!("Please specify a game ID using the command-line interface with --gameid <id>");
-            Ok(())
-        },
-        Err(_) => {
-            // Fall back to trying to get current running game
-            let game_id = match game_utils::get_game_id(&server_base_url).await {
-                Ok(game_info) => {
-                    if let Some(id) = game_info.split(',').next() {
-                        println!("Using detected game: {}", id.trim());
-                        id.trim().to_string()
-                    } else {
-                        return Err("Failed to extract game ID from response".into());
-                    }
-                },
-                Err(e) => {
-                    return Err(format!("No running game found: {e}").into());
+    if let Ok(()) = game_utils::list_games(&server_base_url).await {
+        println!();
+        println!("Please specify a game ID using the command-line interface with --gameid <id>");
+        Ok(())
+    } else {
+        // Fall back to trying to get current running game
+        let game_id = match game_utils::get_game_id(&server_base_url).await {
+            Ok(game_info) => {
+                if let Some(id) = game_info.split(',').next() {
+                    println!("Using detected game: {}", id.trim());
+                    id.trim().to_string()
+                } else {
+                    return Err("Failed to extract game ID from response".into());
                 }
-            };
+            },
+            Err(e) => {
+                return Err(format!("No running game found: {e}").into());
+            }
+        };
 
-            run_client_once_with_game_id(&server_base_url, &game_id, &default_client_name).await
-        }
+        run_client_once_with_game_id(&server_base_url, &game_id, &default_client_name).await
     }
 }
 
@@ -241,11 +235,10 @@ pub async fn run_client_with_exit_flag_and_game_id(server_base_url: &str, game_i
                                 println!("🎉 GAME OVER: BINGO has been reached! 🎉");
                                 println!("The game has ended. No more numbers can be extracted.");
                                 break false; // Exit the main loop
-                            } else {
-                                eprintln!("Error extracting number: {e}");
-                                // Continue waiting for user input
-                                continue;
                             }
+                            eprintln!("Error extracting number: {e}");
+                            // Continue waiting for user input
+                            continue;
                         }
                     }
                 }
@@ -394,7 +387,7 @@ async fn main() {
     let args = Args::parse();
 
     match run_client_with_args(args).await {
-        Ok(_) => {
+        Ok(()) => {
             println!("Client finished successfully.");
         }
         Err(e) => {
@@ -417,7 +410,7 @@ async fn run_client_with_args(args: Args) -> Result<(), Box<dyn Error>> {
 
     // Test server connectivity first
     match game_utils::test_server_connection(&server_base_url).await {
-        Ok(_) => println!("Ok. ✓"),
+        Ok(()) => println!("Ok. ✓"),
         Err(e) => {
             eprintln!("Error. ✗ Failed to connect to server: {e}");
             eprintln!("Make sure the tombola server is running on {server_base_url}");
@@ -454,21 +447,18 @@ async fn run_client_with_args(args: Args) -> Result<(), Box<dyn Error>> {
             Err(e) => {
                 eprintln!("Failed to list games: {e}");
                 // Fall back to trying to get current running game as before
-                match game_utils::get_game_id(&server_base_url).await {
-                    Ok(game_info) => {
-                        // Extract just the game_id from the formatted string
-                        if let Some(id) = game_info.split(',').next() {
-                            println!("No games list available, using detected game: {}", id.trim());
-                            id.trim().to_string()
-                        } else {
-                            return Err("Failed to extract game ID from response".into());
-                        }
-                    },
-                    Err(_) => {
-                        eprintln!("No game ID provided and no running game found.");
-                        eprintln!("Use --gameid <id> to specify a game, --newgame to create one, or --listgames to see available games.");
-                        return Err("Game ID required".into());
+                if let Ok(game_info) = game_utils::get_game_id(&server_base_url).await {
+                    // Extract just the game_id from the formatted string
+                    if let Some(id) = game_info.split(',').next() {
+                        println!("No games list available, using detected game: {}", id.trim());
+                        id.trim().to_string()
+                    } else {
+                        return Err("Failed to extract game ID from response".into());
                     }
+                } else {
+                    eprintln!("No game ID provided and no running game found.");
+                    eprintln!("Use --gameid <id> to specify a game, --newgame to create one, or --listgames to see available games.");
+                    return Err("Game ID required".into());
                 }
             }
         }

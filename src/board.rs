@@ -11,19 +11,19 @@ pub const BOARD_ID: &str = "0000000000000000";
 
 /// Returns the board's client ID as a String
 #[inline]
-pub fn board_client_id() -> String {
+#[must_use] pub fn board_client_id() -> String {
     BOARD_ID.to_string()
 }
 
 /// Returns the board's card ID as a String
 #[inline]
-pub fn board_card_id() -> String {
+#[must_use] pub fn board_card_id() -> String {
     BOARD_ID.to_string()
 }
 
 /// Returns the board ID as a String (generic helper for any string conversion)
 #[inline]
-pub fn board_id_string() -> String {
+#[must_use] pub fn board_id_string() -> String {
     BOARD_ID.to_string()
 }
 
@@ -42,7 +42,7 @@ impl Default for Board {
 }
 
 impl Board {
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         Board {
             numbers: Vec::new(),
             marked_numbers: HashSet::new(),
@@ -74,19 +74,19 @@ impl Board {
         }
     }
 
-    pub fn get_numbers(&self) -> &Vec<Number> {
+    #[must_use] pub fn get_numbers(&self) -> &Vec<Number> {
         &self.numbers
     }
 
-    pub fn len(&self) -> usize {
+    #[must_use] pub fn len(&self) -> usize {
         self.numbers.len()
     }
 
-    pub fn is_empty(&self) -> bool {
+    #[must_use] pub fn is_empty(&self) -> bool {
         self.numbers.is_empty()
     }
 
-    pub fn get_sorted_entries(&self) -> Vec<(Number, bool)> {
+    #[must_use] pub fn get_sorted_entries(&self) -> Vec<(Number, bool)> {
         let mut sorted: Vec<_> = self.numbers.iter()
             .map(|&number| (number, self.marked_numbers.contains(&number)))
             .collect();
@@ -94,7 +94,7 @@ impl Board {
         sorted
     }
 
-    pub fn get_last_numbers(&self, n: usize) -> Vec<Number> {
+    #[must_use] pub fn get_last_numbers(&self, n: usize) -> Vec<Number> {
         if self.numbers.len() <= 1 {
             return Vec::new();
         }

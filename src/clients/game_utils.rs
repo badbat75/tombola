@@ -73,8 +73,8 @@ pub async fn test_server_connection(server_base_url: &str) -> Result<(), Box<dyn
     }
 }
 
-/// Extract game ID from formatted string (used when get_game_id returns "game_id, started at: date")
-pub fn extract_game_id_from_info(game_info: &str) -> Option<String> {
+/// Extract game ID from formatted string (used when `get_game_id` returns "`game_id`, started at: date")
+#[must_use] pub fn extract_game_id_from_info(game_info: &str) -> Option<String> {
     game_info.split(',').next().map(|id| id.trim().to_string())
 }
 

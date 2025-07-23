@@ -38,7 +38,7 @@ pub struct ClientInfo {
 }
 
 impl ClientInfo {
-    pub fn new(name: &str, client_type: &str, email: &str) -> Self {
+    #[must_use] pub fn new(name: &str, client_type: &str, email: &str) -> Self {
         // Generate a client ID based on name, type, and current time
         let mut hasher = DefaultHasher::new();
         
@@ -63,7 +63,7 @@ impl ClientInfo {
         }
     }
 
-    pub fn client_id(&self) -> &str {
+    #[must_use] pub fn client_id(&self) -> &str {
         &self.id
     }
 }
@@ -82,7 +82,7 @@ impl Default for ClientRegistry {
 
 impl ClientRegistry {
     /// Create a new empty registry
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         Self {
             clients: Arc::new(Mutex::new(HashMap::new())),
         }

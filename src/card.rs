@@ -69,11 +69,11 @@ impl Default for CardManagement {
 }
 
 impl CardManagement {
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         Self
     }
 
-    pub fn generate_card_group(&self) -> Vec<Card> {
+    #[must_use] pub fn generate_card_group(&self) -> Vec<Card> {
         let columns = ((LASTNUMBER - FIRSTNUMBER + 1) / 10) as usize;  // Dynamic column calculation
         let numbers_per_card = ((LASTNUMBER - FIRSTNUMBER + 1) / CARDSNUMBER) as usize;
 
@@ -188,7 +188,7 @@ impl CardManagement {
                     }
                 }
                 // Sort numbers in each column of each card
-                cards_numbers[card][col].sort();
+                cards_numbers[card][col].sort_unstable();
             }
         }
 
@@ -207,7 +207,7 @@ impl CardManagement {
                 card_numbers[0].remove(pos);
                 // Add 90 to column 8 and keep it sorted
                 card_numbers[8].push(90);
-                card_numbers[8].sort();
+                card_numbers[8].sort_unstable();
             }
         }
 
@@ -262,7 +262,7 @@ impl CardManagement {
         row_assignments
     }
 
-    pub fn generate_cards(&self, requested_cards: usize) -> Vec<CardWithId> {
+    #[must_use] pub fn generate_cards(&self, requested_cards: usize) -> Vec<CardWithId> {
         let mut all_cards = Vec::new();
         let mut remaining_cards = requested_cards;
         let mut rng = rng();
@@ -355,7 +355,7 @@ impl CardManagement {
         hasher.finish()
     }
 
-    pub fn generate_card_group_with_ids(&self) -> Vec<CardWithId> {
+    #[must_use] pub fn generate_card_group_with_ids(&self) -> Vec<CardWithId> {
         const MAX_RETRIES: usize = 100;
         let mut attempt = 0;
 
@@ -401,22 +401,20 @@ impl CardManagement {
     }
 
     /// Generate cards for a client and return card info structures
-    pub fn generate_cards_for_client(&self, count: u32) -> Vec<CardInfo> {
+    #[must_use] pub fn generate_cards_for_client(&self, count: u32) -> Vec<CardInfo> {
         let cards_with_ids = self.generate_cards(count as usize);
 
         cards_with_ids.into_iter().map(|card_with_id| {
             let card_id_str = format!("{:016X}", card_with_id.id);
             CardInfo {
                 card_id: card_id_str,
-                card_data: card_with_id.card.iter().map(|row| {
-                    row.to_vec()
-                }).collect(),
+                card_data: card_with_id.card.clone(),
             }
         }).collect()
     }
 
-    /// Create a card assignment from a CardWithId and client_id
-    pub fn create_card_assignment(&self, card_with_id: CardWithId, client_id: String) -> CardAssignment {
+    /// Create a card assignment from a `CardWithId` and `client_id`
+    #[must_use] pub fn create_card_assignment(&self, card_with_id: CardWithId, client_id: String) -> CardAssignment {
         let card_id_str = format!("{:016X}", card_with_id.id);
         CardAssignment {
             card_id: card_id_str,
@@ -425,18 +423,16 @@ impl CardManagement {
         }
     }
 
-    /// Convert Card to CardInfo for responses
-    pub fn card_to_info(&self, card: &Card, card_id: String) -> CardInfo {
+    /// Convert Card to `CardInfo` for responses
+    #[must_use] pub fn card_to_info(&self, card: &Card, card_id: String) -> CardInfo {
         CardInfo {
             card_id,
-            card_data: card.iter().map(|row| {
-                row.to_vec()
-            }).collect(),
+            card_data: card.clone(),
         }
     }
 
     /// Generate cards and assignments for a client
-    pub fn generate_cards_and_assignments(&self, count: u32, client_id: String) -> (Vec<CardInfo>, Vec<CardAssignment>) {
+    #[must_use] pub fn generate_cards_and_assignments(&self, count: u32, client_id: String) -> (Vec<CardInfo>, Vec<CardAssignment>) {
         let cards_with_ids = self.generate_cards(count as usize);
         let mut card_infos = Vec::new();
         let mut assignments = Vec::new();
@@ -447,9 +443,7 @@ impl CardManagement {
             // Create card info for response first (takes ownership of card_id_str)
             let card_info = CardInfo {
                 card_id: card_id_str.clone(),
-                card_data: card_with_id.card.iter().map(|row| {
-                    row.to_vec()
-                }).collect(),
+                card_data: card_with_id.card.clone(),
             };
             card_infos.push(card_info);
 
@@ -466,7 +460,7 @@ impl CardManagement {
     }
 
     /// Generate cards and handle complete assignment process
-    pub fn generate_and_assign_cards(&self, count: u32, client_id: &str, client_type: Option<&str>) -> (Vec<CardInfo>, Vec<String>, Vec<CardAssignment>) {
+    #[must_use] pub fn generate_and_assign_cards(&self, count: u32, client_id: &str, client_type: Option<&str>) -> (Vec<CardInfo>, Vec<String>, Vec<CardAssignment>) {
         // Check if this is a board client
         let is_board_client = client_type == Some("board");
         
@@ -495,9 +489,7 @@ impl CardManagement {
             // Convert Card to CardInfo for response
             let card_info = CardInfo {
                 card_id: card_id_str.clone(),
-                card_data: card_with_id.card.iter().map(|row| {
-                    row.to_vec()
-                }).collect(),
+                card_data: card_with_id.card.clone(),
             };
             card_infos.push(card_info);
 
@@ -561,7 +553,7 @@ impl Default for CardAssignmentManager {
 }
 
 impl CardAssignmentManager {
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         Self {
             assignments: HashMap::new(),
             client_cards: HashMap::new(),
@@ -588,19 +580,19 @@ impl CardAssignmentManager {
         (card_infos, client_card_ids)
     }
 
-    pub fn get_client_cards(&self, client_id: &str) -> Option<&Vec<String>> {
+    #[must_use] pub fn get_client_cards(&self, client_id: &str) -> Option<&Vec<String>> {
         self.client_cards.get(client_id)
     }
 
-    pub fn get_card_assignment(&self, card_id: &str) -> Option<&CardAssignment> {
+    #[must_use] pub fn get_card_assignment(&self, card_id: &str) -> Option<&CardAssignment> {
         self.assignments.get(card_id)
     }
 
-    pub fn get_all_assignments(&self) -> &HashMap<String, CardAssignment> {
+    #[must_use] pub fn get_all_assignments(&self) -> &HashMap<String, CardAssignment> {
         &self.assignments
     }
 
-    pub fn client_owns_card(&self, client_id: &str, card_id: &str) -> bool {
+    #[must_use] pub fn client_owns_card(&self, client_id: &str, card_id: &str) -> bool {
         if let Some(assignment) = self.assignments.get(card_id) {
             assignment.client_id == client_id
         } else {
@@ -608,7 +600,7 @@ impl CardAssignmentManager {
         }
     }
 
-    pub fn get_client_assigned_cards(&self, client_id: &str) -> Vec<AssignedCardInfo> {
+    #[must_use] pub fn get_client_assigned_cards(&self, client_id: &str) -> Vec<AssignedCardInfo> {
         self.client_cards.get(client_id)
             .map(|card_ids| {
                 card_ids.iter().map(|card_id| {
@@ -622,7 +614,7 @@ impl CardAssignmentManager {
     }
 
     // Helper function to get client name from card ID
-    pub fn get_client_name_for_card(&self, card_id: &str, client_registry: &ClientRegistry) -> String {
+    #[must_use] pub fn get_client_name_for_card(&self, card_id: &str, client_registry: &ClientRegistry) -> String {
         if card_id == BOARD_ID {
             return "Board".to_string();
         }
@@ -640,7 +632,7 @@ impl CardAssignmentManager {
     }
 
     // Helper function to get client ID from card ID
-    pub fn get_client_id_for_card(&self, card_id: &str) -> String {
+    #[must_use] pub fn get_client_id_for_card(&self, card_id: &str) -> String {
         if let Some(assignment) = self.get_card_assignment(card_id) {
             return assignment.client_id.to_string();
         }

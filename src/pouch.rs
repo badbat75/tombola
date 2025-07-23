@@ -14,18 +14,18 @@ impl Default for Pouch {
 }
 
 impl Pouch {
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         let numbers: Vec<Number> = (FIRSTNUMBER..=LASTNUMBER).collect();
         Pouch {
             numbers,
         }
     }
 
-    pub fn len(&self) -> usize {
+    #[must_use] pub fn len(&self) -> usize {
         self.numbers.len()
     }
 
-    pub fn is_empty(&self) -> bool {
+    #[must_use] pub fn is_empty(&self) -> bool {
         self.numbers.is_empty()
     }
 

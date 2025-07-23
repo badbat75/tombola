@@ -66,7 +66,7 @@ impl ClientConfig {
         Ok(ClientConfig { host, port, timeout, retry_attempts, client_name })
     }
 
-    pub fn load_or_default() -> Self {
+    #[must_use] pub fn load_or_default() -> Self {
         let config_path = "conf/client.conf";
 
         match Self::from_file(config_path) {
@@ -81,7 +81,7 @@ impl ClientConfig {
         }
     }
 
-    pub fn server_url(&self) -> String {
+    #[must_use] pub fn server_url(&self) -> String {
         format!("http://{}:{}", self.host, self.port)
     }
 }
@@ -102,7 +102,7 @@ impl ServerConfig {
         Ok(ServerConfig { host, port })
     }
 
-    pub fn load_or_default() -> Self {
+    #[must_use] pub fn load_or_default() -> Self {
         let config_path = "conf/server.conf";
 
         match Self::from_file(config_path) {
@@ -146,13 +146,13 @@ mod tests {
 
     #[test]
     fn test_parse_config() {
-        let content = r#"
+        let content = r"
             # This is a comment
             host = 192.168.1.100
             port = 8080
             # Another comment
             max_connections = 50
-        "#;
+        ";
 
         let config = parse_config(content).unwrap();
         assert_eq!(config.get("host"), Some(&"192.168.1.100".to_string()));

@@ -15,7 +15,7 @@ pub struct DeltaPos {
 }
 
 // Function to calculate the horizontal and vertical shifts
-pub fn downrightshift(prev_num: Number, curr_num: Number) -> DeltaPos {
+#[must_use] pub fn downrightshift(prev_num: Number, curr_num: Number) -> DeltaPos {
     let prev_num = prev_num as i8;
     let curr_num = curr_num as i8;
     let numbers_per_row = (BOARDCONFIG.cols_per_card * BOARDCONFIG.cards_per_row) as i8;
@@ -76,7 +76,7 @@ pub fn print_board(board: &Board) {
 }
 
 // Function to output the last n previous numbers from the board
-pub fn print_last_numbers(board: &Board, n: usize) -> Vec<Number> {
+#[must_use] pub fn print_last_numbers(board: &Board, n: usize) -> Vec<Number> {
     board.get_last_numbers(n)
 }
 
@@ -86,7 +86,7 @@ pub enum KeyAction {
     Refresh,  // F5 key pressed for screen update
 }
 
-pub fn wait_for_user_action() -> KeyAction {
+#[must_use] pub fn wait_for_user_action() -> KeyAction {
     println!("\nPress ENTER to extract a number, F5 to refresh screen, or ESC to exit");
 
     // Enable raw mode to capture individual key presses

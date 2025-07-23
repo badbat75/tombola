@@ -12,7 +12,7 @@ use crate::config::ServerConfig;
 use crate::logging::{log_info, log_error, log_error_stderr};
 use crate::game::GameRegistry;
 use crate::client::ClientRegistry;
-use crate::api_handlers::*;
+use crate::api_handlers::{handle_global_clientinfo, handle_global_clientinfo_by_id, handle_global_register, handle_global_gameslist, handle_global_newgame, handle_join, handle_generatecards, handle_listassignedcards, handle_getassignedcard, handle_board, handle_pouch, handle_scoremap, handle_status, handle_extract, handle_dumpgame};
 
 // Response structures for JSON serialization
 #[derive(serde::Serialize)]
@@ -27,7 +27,7 @@ pub struct AppState {
     pub config: ServerConfig,
 }
 
-pub fn start_server(config: ServerConfig) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>) {
+#[must_use] pub fn start_server(config: ServerConfig) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>) {
     let shutdown_signal = Arc::new(AtomicBool::new(false));
     let _shutdown_clone = Arc::clone(&shutdown_signal);
 

@@ -286,20 +286,14 @@ pub async fn handle_generatecards(
     let game = get_game_from_registry(&app_state, &game_id).await?;
 
     // Get client ID from headers
-    let client_id = match headers.get("X-Client-ID") {
-        Some(header_value) => {
-            match header_value.to_str() {
-                Ok(id) => id.to_string(),
-                Err(_) => {
-                    log_error("Invalid client ID in header");
-                    return Err(ApiError::new(StatusCode::BAD_REQUEST, "Invalid client ID in header"));
-                }
-            }
+    let client_id = if let Some(header_value) = headers.get("X-Client-ID") {
+        if let Ok(id) = header_value.to_str() { id.to_string() } else {
+            log_error("Invalid client ID in header");
+            return Err(ApiError::new(StatusCode::BAD_REQUEST, "Invalid client ID in header"));
         }
-        None => {
-            log_error("Client ID header (X-Client-ID) is required");
-            return Err(ApiError::new(StatusCode::BAD_REQUEST, "Client ID header (X-Client-ID) is required"));
-        }
+    } else {
+        log_error("Client ID header (X-Client-ID) is required");
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "Client ID header (X-Client-ID) is required"));
     };
 
     // Verify client is registered and get their info
@@ -364,20 +358,14 @@ pub async fn handle_listassignedcards(
     let game = get_game_from_registry(&app_state, &game_id).await?;
 
     // Get client ID from headers
-    let client_id = match headers.get("X-Client-ID") {
-        Some(header_value) => {
-            match header_value.to_str() {
-                Ok(id) => id.to_string(),
-                Err(_) => {
-                    log_error("Invalid client ID in header");
-                    return Err(ApiError::new(StatusCode::BAD_REQUEST, "Invalid client ID in header"));
-                }
-            }
+    let client_id = if let Some(header_value) = headers.get("X-Client-ID") {
+        if let Ok(id) = header_value.to_str() { id.to_string() } else {
+            log_error("Invalid client ID in header");
+            return Err(ApiError::new(StatusCode::BAD_REQUEST, "Invalid client ID in header"));
         }
-        None => {
-            log_error("Client ID header (X-Client-ID) is required");
-            return Err(ApiError::new(StatusCode::BAD_REQUEST, "Client ID header (X-Client-ID) is required"));
-        }
+    } else {
+        log_error("Client ID header (X-Client-ID) is required");
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "Client ID header (X-Client-ID) is required"));
     };
 
     // Verify client is registered and get their info
@@ -427,20 +415,14 @@ pub async fn handle_getassignedcard(
     let game = get_game_from_registry(&app_state, &game_id).await?;
 
     // Get client ID from headers
-    let client_id = match headers.get("X-Client-ID") {
-        Some(header_value) => {
-            match header_value.to_str() {
-                Ok(id) => id.to_string(),
-                Err(_) => {
-                    log_error("Invalid client ID in header");
-                    return Err(ApiError::new(StatusCode::BAD_REQUEST, "Invalid client ID in header"));
-                }
-            }
+    let client_id = if let Some(header_value) = headers.get("X-Client-ID") {
+        if let Ok(id) = header_value.to_str() { id.to_string() } else {
+            log_error("Invalid client ID in header");
+            return Err(ApiError::new(StatusCode::BAD_REQUEST, "Invalid client ID in header"));
         }
-        None => {
-            log_error("Client ID header (X-Client-ID) is required");
-            return Err(ApiError::new(StatusCode::BAD_REQUEST, "Client ID header (X-Client-ID) is required"));
-        }
+    } else {
+        log_error("Client ID header (X-Client-ID) is required");
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "Client ID header (X-Client-ID) is required"));
     };
 
     // Verify client is registered and get their info
@@ -464,26 +446,21 @@ pub async fn handle_getassignedcard(
     };
 
     // Verify the card exists and belongs to the client
-    let card_assignment = match card_assignment {
-        Some(assignment) => {
-            if assignment.client_id != client_id {
-                log_error(&format!("Card {card_id} not assigned to client {client_id}"));
-                return Err(ApiError::new(StatusCode::FORBIDDEN, "Card not assigned to this client"));
-            }
-            assignment
+    let card_assignment = if let Some(assignment) = card_assignment {
+        if assignment.client_id != client_id {
+            log_error(&format!("Card {card_id} not assigned to client {client_id}"));
+            return Err(ApiError::new(StatusCode::FORBIDDEN, "Card not assigned to this client"));
         }
-        None => {
-            log_error(&format!("Card not found: {card_id}"));
-            return Err(ApiError::new(StatusCode::NOT_FOUND, "Card not found"));
-        }
+        assignment
+    } else {
+        log_error(&format!("Card not found: {card_id}"));
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "Card not found"));
     };
 
     // Create response
     let card_info = crate::card::CardInfo {
         card_id: card_assignment.card_id,
-        card_data: card_assignment.card_data.iter().map(|row| {
-            row.to_vec()
-        }).collect(),
+        card_data: card_assignment.card_data.clone(),
     };
 
     Ok(Json(serde_json::to_value(&card_info).unwrap()))
@@ -589,20 +566,14 @@ pub async fn handle_extract(
     let game = get_game_from_registry(&app_state, &game_id).await?;
 
     // Get client ID from headers for authentication
-    let client_id = match headers.get("X-Client-ID") {
-        Some(header_value) => {
-            match header_value.to_str() {
-                Ok(id) => id.to_string(),
-                Err(_) => {
-                    log_error("Invalid client ID in header");
-                    return Err(ApiError::new(StatusCode::BAD_REQUEST, "Invalid client ID in header"));
-                }
-            }
+    let client_id = if let Some(header_value) = headers.get("X-Client-ID") {
+        if let Ok(id) = header_value.to_str() { id.to_string() } else {
+            log_error("Invalid client ID in header");
+            return Err(ApiError::new(StatusCode::BAD_REQUEST, "Invalid client ID in header"));
         }
-        None => {
-            log_error("Client ID header (X-Client-ID) is required");
-            return Err(ApiError::new(StatusCode::BAD_REQUEST, "Client ID header (X-Client-ID) is required"));
-        }
+    } else {
+        log_error("Client ID header (X-Client-ID) is required");
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "Client ID header (X-Client-ID) is required"));
     };
 
     // Check if the client is registered to this game
@@ -676,20 +647,14 @@ pub async fn handle_global_newgame(
     log_info("New game request");
 
     // Get client ID from headers for authentication
-    let client_id = match headers.get("X-Client-ID") {
-        Some(header_value) => {
-            match header_value.to_str() {
-                Ok(id) => id.to_string(),
-                Err(_) => {
-                    log_error("Invalid client ID in header");
-                    return Err(ApiError::new(StatusCode::BAD_REQUEST, "Invalid client ID in header"));
-                }
-            }
+    let client_id = if let Some(header_value) = headers.get("X-Client-ID") {
+        if let Ok(id) = header_value.to_str() { id.to_string() } else {
+            log_error("Invalid client ID in header");
+            return Err(ApiError::new(StatusCode::BAD_REQUEST, "Invalid client ID in header"));
         }
-        None => {
-            log_error("Client ID header (X-Client-ID) is required");
-            return Err(ApiError::new(StatusCode::BAD_REQUEST, "Client ID header (X-Client-ID) is required"));
-        }
+    } else {
+        log_error("Client ID header (X-Client-ID) is required");
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "Client ID header (X-Client-ID) is required"));
     };
 
     // Only allow board client (ID: "0000000000000000") to create a new game
@@ -741,20 +706,14 @@ pub async fn handle_dumpgame(
     let game = get_game_from_registry(&app_state, &game_id).await?;
 
     // Check for client authentication header
-    let client_id = match headers.get("X-Client-ID") {
-        Some(header_value) => {
-            match header_value.to_str() {
-                Ok(id) => id,
-                Err(_) => {
-                    log_error("Invalid X-Client-ID header");
-                    return Err(ApiError::new(StatusCode::BAD_REQUEST, "Invalid X-Client-ID header"));
-                }
-            }
+    let client_id = if let Some(header_value) = headers.get("X-Client-ID") {
+        if let Ok(id) = header_value.to_str() { id } else {
+            log_error("Invalid X-Client-ID header");
+            return Err(ApiError::new(StatusCode::BAD_REQUEST, "Invalid X-Client-ID header"));
         }
-        None => {
-            log_error("Missing X-Client-ID header");
-            return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Missing X-Client-ID header"));
-        }
+    } else {
+        log_error("Missing X-Client-ID header");
+        return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Missing X-Client-ID header"));
     };
 
     // Only allow board client type to dump the game - check game-specific client type
@@ -817,10 +776,10 @@ pub async fn handle_global_gameslist(
                             let parts: Vec<&str> = info.split("closed_at=").collect();
                             if parts.len() > 1 {
                                 let closed_part = parts[1].split(']').next().unwrap_or("");
-                                if !closed_part.is_empty() {
-                                    Some(closed_part.to_string())
-                                } else {
+                                if closed_part.is_empty() {
                                     None
+                                } else {
+                                    Some(closed_part.to_string())
                                 }
                             } else {
                                 None
@@ -924,7 +883,7 @@ mod tests {
             name: "Board".to_string(),
             client_type: "board".to_string(),
             registered_at: std::time::SystemTime::now(),
-            email: "".to_string(),
+            email: String::new(),
         };
         
         // Add to global registry (this will not overwrite if already exists)
@@ -1978,15 +1937,12 @@ mod tests {
                         println!("🏆 Game {}: BINGO REACHED! Game completed after {} extractions",
                                  game_index + 1, extraction_count - 1);
                         break;
-                    } else {
-                        panic!("Unexpected extraction error in game {}: {}", game_index + 1, error.message);
                     }
+                    panic!("Unexpected extraction error in game {}: {}", game_index + 1, error.message);
                 }
 
                 // Safety check to prevent infinite loops
-                if extraction_count >= max_extractions {
-                    panic!("Game {} exceeded maximum extractions without reaching BINGO", game_index + 1);
-                }
+                assert!((extraction_count < max_extractions), "Game {} exceeded maximum extractions without reaching BINGO", game_index + 1);
             }
 
             // Verify game is properly dumped and in closed state
