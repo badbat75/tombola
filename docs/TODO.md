@@ -1,0 +1,5 @@
+** Implement a scheduler that purges closed games after a configurable time after they were closed.
+
+** Implmenet JWT Token verification to protect the API. Upon registration JWT Token will be used to register the user name with associated email in the JWT Token claim. The JWT Token will use a secret key configurable in the `server.conf` file.
+
+** Implement unattended mode for a game and globally. A scheduler start a new game and wait specific configurable conditions to extract the first number such as: minimum number of player, a specific time to start, minimum number of cards. Then will extract a number every a certain amount of configurable time. And then with another configuration paramenter to decide to start another game with the same characterisitics of the last games. All those options can be configured in `server.conf` file.
