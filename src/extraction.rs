@@ -15,6 +15,7 @@ pub fn perform_extraction(
     scorecard_ref: &Arc<Mutex<ScoreCard>>,
     card_manager: &Arc<Mutex<CardAssignmentManager>>,
     current_working_score: Number,
+    board_client_id: Option<&str>,
 ) -> Result<(Number, Number), String> {
     // Open pouch mutex once for empty check and extraction
     let extracted: Number = {
@@ -52,7 +53,7 @@ pub fn perform_extraction(
         if let Ok(card_assignments_manager) = card_manager.lock() {
             if let Ok(mut scorecard) = scorecard_ref.lock() {
                 if let Ok(board) = board_ref.lock() {
-                    scorecard.calculate_and_update_best_score(&board, &card_assignments_manager, current_working_score)
+                    scorecard.calculate_and_update_best_score(&board, &card_assignments_manager, current_working_score, board_client_id)
                 } else {
                     return Err("Failed to acquire board lock for scoring".to_string());
                 }

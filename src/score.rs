@@ -2,7 +2,7 @@
 // This module handles the scorecard logic and prize checking for the Tombola game.
 
 use crate::defs::{BOARDCONFIG, NUMBERSPERCARD, Number};
-use crate::board::{Board, board_client_id, board_card_id};
+use crate::board::{Board, board_card_id};
 use crate::card::CardAssignmentManager;
 use serde::{Deserialize, Serialize};
 
@@ -303,7 +303,8 @@ impl ScoreCard {
         &mut self,
         board: &Board,
         card_manager: &CardAssignmentManager,
-        current_working_score: Number
+        current_working_score: Number,
+        board_client_id: Option<&str>
     ) -> Number {
         // Get board numbers internally
         let board_numbers = board.get_numbers();
@@ -326,37 +327,63 @@ impl ScoreCard {
             if bestscore > current_working_score {
                 // Special handling for BINGO (15) - it's a unique achievement, not a line progression
                 if bestscore == NUMBERSPERCARD {
-                    // BINGO is achieved - only store the BINGO achievement itself
-                    let bingo_achievements = if allcardscore_value == NUMBERSPERCARD {
-                        // Card achieved BINGO
-                        card_details.iter()
-                            .filter(|(_, numbers)| numbers.len() as Number == NUMBERSPERCARD)
-                            .map(|(card_id, numbers)| {
-                                ScoreAchievement {
-                                    client_id: card_manager.get_client_id_for_card(card_id),
-                                    card_id: card_id.to_string(),
-                                    numbers: numbers.to_vec(),
+                    // BINGO is achieved - only store legitimate BINGO achievements
+                    let mut bingo_achievements = Vec::new();
+                    
+                    // Check for card BINGO achievements
+                    if allcardscore_value == NUMBERSPERCARD {
+                        // Only include cards that actually have all 15 numbers extracted
+                        for (card_id, _) in &card_details {
+                            if let Some(assignment) = card_assignments.get(card_id) {
+                                // Count how many numbers from this card have been extracted
+                                let mut card_numbers = Vec::new();
+                                for row in &assignment.card_data {
+                                    for &number in row.iter().flatten() {
+                                        card_numbers.push(number);
+                                    }
                                 }
-                            }).collect()
-                    } else if boardscore_value == NUMBERSPERCARD {
-                        // Board achieved BINGO
-                        vec![ScoreAchievement {
-                            client_id: board_client_id(),
-                            card_id: board_card_id(),
-                            numbers: board_numbers_contributing.to_vec(),
-                        }]
-                    } else {
-                        Vec::new()
-                    };
+                                
+                                let extracted_from_card: Vec<Number> = card_numbers.iter()
+                                    .filter(|&&num| board_numbers.contains(&num))
+                                    .copied()
+                                    .collect();
+                                
+                                // Only include if this card has exactly 15 extracted numbers (BINGO)
+                                if extracted_from_card.len() == NUMBERSPERCARD as usize {
+                                    bingo_achievements.push(ScoreAchievement {
+                                        client_id: card_manager.get_client_id_for_card(card_id),
+                                        card_id: card_id.to_string(),
+                                        numbers: extracted_from_card,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Check for board BINGO achievement
+                    if boardscore_value == NUMBERSPERCARD {
+                        if let Some(client_id) = board_client_id {
+                            bingo_achievements.push(ScoreAchievement {
+                                client_id: client_id.to_string(),
+                                card_id: board_card_id(),
+                                numbers: board_numbers_contributing.to_vec(),
+                            });
+                        }
+                    }
 
+                    // Only store BINGO achievements if we have any legitimate ones
                     if !bingo_achievements.is_empty() {
                         self.score_map.insert(NUMBERSPERCARD, bingo_achievements);
                     }
+                    
+                    // When BINGO is reached, we don't process regular line achievements
+                    // BINGO is the final achievement
                 } else {
                     // Regular line achievements (2-5) - store achievements for all levels from 2 to bestscore
                     // This ensures we don't lose previous achievements when reaching a higher level
+                    // NOTE: Only store achievements for valid line levels (2-5), not intermediate levels
 
-                    for achievement_level in 2..=bestscore {
+                    for achievement_level in 2..=std::cmp::min(bestscore, 5) {
                         // Use entry API to avoid double lookup
                         if let std::collections::hash_map::Entry::Vacant(e) = self.score_map.entry(achievement_level) {
                             let level_achievements = if achievement_level == bestscore {
@@ -375,20 +402,26 @@ impl ScoreCard {
 
                                     // If board score also meets this level, include it
                                     if boardscore_value == achievement_level {
-                                        achievements.push(ScoreAchievement {
-                                            client_id: board_client_id(),
-                                            card_id: board_card_id(),
-                                            numbers: board_numbers_contributing.to_vec(),
-                                        });
+                                        if let Some(client_id) = board_client_id {
+                                            achievements.push(ScoreAchievement {
+                                                client_id: client_id.to_string(),
+                                                card_id: board_card_id(),
+                                                numbers: board_numbers_contributing.to_vec(),
+                                            });
+                                        }
                                     }
                                     achievements
                                 } else if boardscore_value == achievement_level {
-                                    // Only board achievement
-                                    vec![ScoreAchievement {
-                                        client_id: board_client_id(),
-                                        card_id: board_card_id(),
-                                        numbers: board_numbers_contributing.to_vec(),
-                                    }]
+                                    // Only board achievement - only create if we have a client ID
+                                    if let Some(client_id) = board_client_id {
+                                        vec![ScoreAchievement {
+                                            client_id: client_id.to_string(),
+                                            card_id: board_card_id(),
+                                            numbers: board_numbers_contributing.to_vec(),
+                                        }]
+                                    } else {
+                                        Vec::new()
+                                    }
                                 } else {
                                     Vec::new()
                                 }
@@ -415,16 +448,18 @@ impl ScoreCard {
 
                                 // Check if board achieved this level
                                 if boardscore_value >= achievement_level {
-                                    // For board, take the first 'achievement_level' numbers from the contributing numbers
-                                    let level_numbers: Vec<Number> = board_numbers_contributing.iter()
-                                        .take(achievement_level as usize)
-                                        .copied()
-                                        .collect();
-                                    level_achievements.push(ScoreAchievement {
-                                        client_id: board_client_id(),
-                                        card_id: board_card_id(),
-                                        numbers: level_numbers,
-                                    });
+                                    if let Some(client_id) = board_client_id {
+                                        // For board, take the first 'achievement_level' numbers from the contributing numbers
+                                        let level_numbers: Vec<Number> = board_numbers_contributing.iter()
+                                            .take(achievement_level as usize)
+                                            .copied()
+                                            .collect();
+                                        level_achievements.push(ScoreAchievement {
+                                            client_id: client_id.to_string(),
+                                            card_id: board_card_id(),
+                                            numbers: level_numbers,
+                                        });
+                                    }
                                 }
 
                                 level_achievements

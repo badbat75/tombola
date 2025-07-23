@@ -615,13 +615,14 @@ impl Game {
 
     /// Perform a number extraction using the coordinated extraction logic
     /// This encapsulates the complex mutex coordination required for extraction
-    pub fn extract_number(&self, current_working_score: Number) -> Result<(Number, Number), String> {
+    pub fn extract_number(&self, current_working_score: Number, board_client_id: Option<&str>) -> Result<(Number, Number), String> {
         perform_extraction(
             &self.pouch,
             &self.board,
             &self.scorecard,
             &self.card_manager,
             current_working_score,
+            board_client_id,
         )
     }
 
@@ -1332,7 +1333,7 @@ mod tests {
         // Extract 5 numbers to get the game started and build some score
         for i in 1..=5 {
             let current_score = game.published_score();
-            let extraction_result = game.extract_number(current_score);
+            let extraction_result = game.extract_number(current_score, None);
             assert!(extraction_result.is_ok(), "Failed to extract number {i}: {extraction_result:?}");
 
             let (extracted_number, new_score) = extraction_result.unwrap();
@@ -1393,7 +1394,7 @@ mod tests {
         let mut extractions = 5;
         while !game.is_bingo_reached() && extractions < 90 {
             let current_score = game.published_score();
-            let extraction_result = game.extract_number(current_score);
+            let extraction_result = game.extract_number(current_score, None);
 
             if extraction_result.is_err() {
                 println!("Extraction failed at score {current_score}: {extraction_result:?}");

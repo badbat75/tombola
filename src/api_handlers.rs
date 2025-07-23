@@ -631,7 +631,7 @@ pub async fn handle_extract(
     }
 
     // Extract a number using the game's coordinated extraction logic
-    match game.extract_number(0) {
+    match game.extract_number(0, Some(&client_id)) {
         Ok((extracted_number, _new_working_score)) => {
             // Get current pouch and board state for response using Game methods
             let numbers_remaining = game.pouch_length();
