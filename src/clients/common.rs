@@ -15,6 +15,7 @@ pub struct RegisterRequest {
     pub name: String,
     pub client_type: String,
     pub nocard: Option<u32>,  // Number of cards to generate during registration
+    pub email: Option<String>,  // Optional email for registration
 }
 
 /// Client registration response

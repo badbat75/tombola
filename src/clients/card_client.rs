@@ -106,12 +106,13 @@ impl TombolaClient {
         println!("Registering client '{}' with server for game '{}'...", self.client_name, game_id);
         println!("🔍 Debug: Sending nocard = {:?}", self.nocard);
 
-        let register_response = registration::register_client(
+        let register_response = registration::join_client(
             &self.server_url,
             game_id,
             &self.client_name,
-            "tombola_client",
+            "player",  // Updated to use proper client type
             self.nocard,
+            None,  // No email provided by default
             &self.http_client
         ).await?;
 

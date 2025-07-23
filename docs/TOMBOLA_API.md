@@ -28,13 +28,14 @@ http://127.0.0.1:3000
 |--------|----------|-------------|---------------|
 | `POST` | `/newgame` | Create new game | Board Client |
 | `GET` | `/gameslist` | List all available games | None |
+| `POST` | `/register` | Register client globally (without joining game) | None |
 | `GET` | `/clientinfo` | Get client information by name (query param) | None |
 | `GET` | `/clientinfo/{client_id}` | Get client information by ID | None |
 
 ### Game-Specific Endpoints
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
-| `POST` | `/{game_id}/register` | Register client to specific game | None |
+| `POST` | `/{game_id}/join` | Join client to specific game | None |
 | `POST` | `/{game_id}/generatecards` | Generate cards for client in game | Client ID |
 | `GET` | `/{game_id}/listassignedcards` | List assigned cards for client | Client ID |
 | `GET` | `/{game_id}/getassignedcard/{card_id}` | Get specific card by ID | Client ID |
@@ -152,20 +153,67 @@ List all available games with their current status and statistics.
 - Shows all games regardless of their state
 - Includes game statistics for informed decision making
 
-### 2. Client Registration (Game-Specific)
+### 2. Global Client Registration
 
-#### POST /{game_id}/register
+#### POST /register
 
-Register a new client to a specific game.
+Register a new client globally without joining a specific game. This creates a client account that can later join multiple games.
 
-**Path Parameters:**
-- `game_id`: ID of the game to register to (e.g., `game_12345678`)
+**No Authentication Required**
 
 **Request Body:**
 ```json
 {
   "name": "client_name",
-  "client_type": "player|admin|viewer",
+  "client_type": "player|board|admin"
+}
+```
+
+**Success Response (200 OK):**
+```json
+{
+  "client_id": "A1B2C3D4E5F6G7H8",
+  "message": "Client 'client_name' registered successfully globally"
+}
+```
+
+**Success Response - Existing Client (200 OK):**
+```json
+{
+  "client_id": "A1B2C3D4E5F6G7H8",
+  "message": "Client 'client_name' already registered globally"
+}
+```
+
+**Error Response - Server Error (500 Internal Server Error):**
+```json
+{
+  "error": "Failed to register client globally"
+}
+```
+
+**Notes:**
+- **Global Registration**: Creates a client account that can be used across multiple games
+- **Reusable Client ID**: The same client ID can be used to join multiple games
+- **No Game Association**: This endpoint does not associate the client with any specific game
+- **Duplicate Handling**: If a client with the same name already exists, returns the existing client information
+- **Future Game Joining**: After global registration, use `/{game_id}/join` to join specific games
+- **Client ID Persistence**: The client ID remains the same across all games the client joins
+
+### 3. Game-Specific Client Registration
+
+#### POST /{game_id}/join
+
+Join a client to a specific game (registers if needed).
+
+**Path Parameters:**
+- `game_id`: ID of the game to join (e.g., `game_12345678`)
+
+**Request Body:**
+```json
+{
+  "name": "client_name",
+  "client_type": "player|board|admin",
   "nocard": 6  // Optional: number of cards to generate during registration (default: 1)
 }
 ```
@@ -174,11 +222,11 @@ Register a new client to a specific game.
 ```json
 {
   "client_id": "A1B2C3D4E5F6G7H8",
-  "message": "Client 'client_name' registered successfully to game game_12345678"
+  "message": "Client 'client_name' joined game game_12345678 successfully"
 }
 ```
 
-**Error Response - Registration After Game Started (409 Conflict):**
+**Error Response - Join After Game Started (409 Conflict):**
 ```json
 {
   "error": "Cannot register new clients after numbers have been extracted in this game"
@@ -193,17 +241,17 @@ Register a new client to a specific game.
 ```
 
 **Notes:**
-- **Game Isolation**: Registration is specific to the game ID in the path
-- **Game State Restriction**: New clients can only be registered when no numbers have been extracted from the pouch in this specific game
-- Once the first number is extracted in a game, all new registration attempts to that game will fail with a 409 Conflict error
+- **Game Isolation**: Joining is specific to the game ID in the path
+- **Game State Restriction**: New clients can only join when no numbers have been extracted from the pouch in this specific game
+- Once the first number is extracted in a game, all new join attempts to that game will fail with a 409 Conflict error
 - This ensures fair play by preventing players from joining mid-game
-- **Client-Side Card Optimization**: Smart clients will first register without requesting cards, then check if cards are already assigned before generating new ones
+- **Client-Side Card Optimization**: Smart clients will first join without requesting cards, then check if cards are already assigned before generating new ones
 - If `nocard` is not specified, the server will automatically generate 1 card for the client by default
 - If `nocard` is specified, the server will generate and assign the requested number of cards to the client
 - If client already exists in this game, returns existing client information
 - Client ID is generated using a hash of name, type, and timestamp
 
-### 3. Client Information (Global)
+### 4. Client Information (Global)
 
 #### GET /clientinfo
 
@@ -252,7 +300,7 @@ Retrieve information about a registered client by client ID across all games.
 - The server uses a global client registry to ensure ID consistency
 - When a client registers to multiple games, they reuse their existing global client ID
 
-### 4. Card Management (Game-Specific)
+### 5. Card Management (Game-Specific)
 
 #### POST /{game_id}/generatecards
 
@@ -349,7 +397,7 @@ Retrieve a specific card assigned to a client within a specific game.
 - Only the client who owns the card can retrieve it
 - Returns `403 Forbidden` if card belongs to another client
 
-### 4. Board & Game State (Game-Specific)
+### 6. Board & Game State (Game-Specific)
 
 #### GET /{game_id}/board
 
@@ -663,51 +711,58 @@ curl -X POST http://127.0.0.1:3000/newgame \
   -H "Content-Type: application/json"
 ```
 
-3. **Register a client to a specific game with default card (1 card):**
+3. **Register a client globally (optional - creates reusable client account):**
 ```bash
-curl -X POST http://127.0.0.1:3000/game_12345678/register \
+curl -X POST http://127.0.0.1:3000/register \
   -H "Content-Type: application/json" \
   -d '{"name": "player1", "client_type": "player"}'
 ```
 
-4. **Register a client to a specific game with multiple cards:**
+4. **Join a client to a specific game with default card (1 card):**
 ```bash
-curl -X POST http://127.0.0.1:3000/game_12345678/register \
+curl -X POST http://127.0.0.1:3000/game_12345678/join \
+  -H "Content-Type: application/json" \
+  -d '{"name": "player1", "client_type": "player"}'
+```
+
+5. **Join a client to a specific game with multiple cards:**
+```bash
+curl -X POST http://127.0.0.1:3000/game_12345678/join \
   -H "Content-Type: application/json" \
   -d '{"name": "player2", "client_type": "player", "nocard": 6}'
 ```
 
-**Note**: After the first number is extracted via `/{game_id}/extract`, registration will fail for that specific game:
+**Note**: After the first number is extracted via `/{game_id}/extract`, joining will fail for that specific game:
 ```bash
 # This will return 409 Conflict if numbers have been extracted in game_12345678
-curl -X POST http://127.0.0.1:3000/game_12345678/register \
+curl -X POST http://127.0.0.1:3000/game_12345678/join \
   -H "Content-Type: application/json" \
   -d '{"name": "lateplayer", "client_type": "player"}'
 ```
 
-5. **Get client information by name (global search):**
+6. **Get client information by name (global search):**
 ```bash
 curl "http://127.0.0.1:3000/clientinfo?name=player1"
 ```
 
-6. **Get client information by ID (global search):**
+7. **Get client information by ID (global search):**
 ```bash
 curl http://127.0.0.1:3000/clientinfo/A1B2C3D4E5F6G7H8
 ```
 
-7. **List assigned cards in specific game:**
+8. **List assigned cards in specific game:**
 ```bash
 curl http://127.0.0.1:3000/game_12345678/listassignedcards \
   -H "X-Client-ID: A1B2C3D4E5F6G7H8"
 ```
 
-8. **Get specific card in specific game:**
+9. **Get specific card in specific game:**
 ```bash
 curl http://127.0.0.1:3000/game_12345678/getassignedcard/card_id_1 \
   -H "X-Client-ID: A1B2C3D4E5F6G7H8"
 ```
 
-9. **Check game state for specific game:**
+10. **Check game state for specific game:**
 ```bash
 curl http://127.0.0.1:3000/game_12345678/status
 curl http://127.0.0.1:3000/game_12345678/board
@@ -715,13 +770,13 @@ curl http://127.0.0.1:3000/game_12345678/pouch
 curl http://127.0.0.1:3000/game_12345678/scoremap
 ```
 
-10. **Extract numbers in specific game (board client only):**
+11. **Extract numbers in specific game (board client only):**
 ```bash
 curl -X POST http://127.0.0.1:3000/game_12345678/extract \
   -H "X-Client-ID: 0000000000000000"
 ```
 
-11. **Dump specific game state:**
+12. **Dump specific game state:**
 ```bash
 curl -X POST http://127.0.0.1:3000/game_12345678/dumpgame \
   -H "X-Client-ID: 0000000000000000"

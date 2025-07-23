@@ -79,7 +79,7 @@ pub struct DumpGameQuery {
     pub filename: Option<String>,
 }
 
-pub async fn handle_register(
+pub async fn handle_join(
     Path(game_id): Path<String>,
     State(app_state): State<Arc<AppState>>,
     JsonExtractor(request): JsonExtractor<RegisterRequest>,
@@ -158,7 +158,7 @@ pub async fn handle_register(
     }))
 }
 
-pub async fn handle_client_info(
+pub async fn handle_global_clientinfo(
     State(app_state): State<Arc<AppState>>,
     Query(params): Query<ClientNameQuery>,
 ) -> Result<Json<ClientInfoResponse>, ApiError> {
@@ -184,7 +184,7 @@ pub async fn handle_client_info(
     }
 }
 
-pub async fn handle_client_info_by_id(
+pub async fn handle_global_clientinfo_by_id(
     State(app_state): State<Arc<AppState>>,
     Path(client_id): Path<String>,
 ) -> Result<Json<ClientInfoResponse>, ApiError> {
@@ -224,7 +224,52 @@ pub async fn handle_client_info_by_id(
     Err(ApiError::new(StatusCode::NOT_FOUND, format!("Client with ID '{client_id}' not found")))
 }
 
-pub async fn handle_generate_cards(
+pub async fn handle_global_register(
+    State(app_state): State<Arc<AppState>>,
+    JsonExtractor(request): JsonExtractor<RegisterRequest>,
+) -> Result<Json<RegisterResponse>, ApiError> {
+    log_info(&format!("Global client registration request: {request:?}"));
+
+    let client_name = &request.name;
+    let client_type = &request.client_type;
+    let email = request.email.as_deref().unwrap_or("");  // Use provided email or empty string
+
+    // Check if the client already exists globally
+    match app_state.global_client_registry.get_by_name(client_name) {
+        Ok(Some(existing_client)) => {
+            // Client already exists globally
+            Ok(Json(RegisterResponse {
+                client_id: existing_client.id.clone(),
+                message: format!("Client '{client_name}' already registered globally"),
+            }))
+        }
+        Ok(None) => {
+            // Client doesn't exist globally, create new one
+            let new_client = ClientInfo::new(client_name, client_type, email);
+
+            // Add to global registry
+            match app_state.global_client_registry.insert(new_client.clone()) {
+                Ok(_) => {
+                    log_info(&format!("Successfully registered client '{client_name}' globally with ID: {}", new_client.id));
+                    Ok(Json(RegisterResponse {
+                        client_id: new_client.id.clone(),
+                        message: format!("Client '{client_name}' registered successfully globally"),
+                    }))
+                }
+                Err(e) => {
+                    log_error(&format!("Failed to add client to global registry: {e}"));
+                    Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to register client globally"))
+                }
+            }
+        }
+        Err(e) => {
+            log_error(&format!("Failed to access global client registry: {e}"));
+            Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to access global client registry"))
+        }
+    }
+}
+
+pub async fn handle_generatecards(
     State(app_state): State<Arc<AppState>>,
     Path(game_id): Path<String>,
     headers: HeaderMap,
@@ -296,7 +341,7 @@ pub async fn handle_generate_cards(
     Ok(Json(response))
 }
 
-pub async fn handle_list_assigned_cards(
+pub async fn handle_listassignedcards(
     State(app_state): State<Arc<AppState>>,
     Path(game_id): Path<String>,
     headers: HeaderMap,
@@ -360,7 +405,7 @@ pub async fn handle_list_assigned_cards(
     Ok(Json(response))
 }
 
-pub async fn handle_get_assigned_card(
+pub async fn handle_getassignedcard(
     State(app_state): State<Arc<AppState>>,
     Path((game_id, card_id)): Path<(String, String)>,
     headers: HeaderMap,
@@ -598,7 +643,7 @@ pub async fn handle_extract(
     }
 }
 
-pub async fn handle_newgame(
+pub async fn handle_global_newgame(
     State(app_state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
@@ -725,7 +770,7 @@ pub async fn handle_dumpgame(
     }
 }
 
-pub async fn handle_games_list(
+pub async fn handle_global_gameslist(
     State(app_state): State<Arc<AppState>>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     log_info("Games list request");
@@ -840,10 +885,11 @@ mod tests {
             name: name.to_string(),
             client_type: "player".to_string(),
             nocard: Some(1),
+            email: None,
         };
 
         let game_id = app_state.game.id().clone(); // Get the game ID from the default game
-        let result = handle_register(Path(game_id), State(app_state.clone()), JsonExtractor(request)).await;
+        let result = handle_join(Path(game_id), State(app_state.clone()), JsonExtractor(request)).await;
         match result {
             Ok(response) => response.0.client_id,
             Err(_) => panic!("Failed to register test client"),
@@ -857,10 +903,11 @@ mod tests {
             name: "test_player".to_string(),
             client_type: "player".to_string(),
             nocard: Some(2),
+            email: None,
         };
 
         let game_id = app_state.game.id().clone();
-        let result = handle_register(Path(game_id.clone()), State(app_state.clone()), JsonExtractor(request)).await;
+        let result = handle_join(Path(game_id.clone()), State(app_state.clone()), JsonExtractor(request)).await;
 
         assert!(result.is_ok());
         let response = result.unwrap();
@@ -875,17 +922,18 @@ mod tests {
             name: "existing_player".to_string(),
             client_type: "player".to_string(),
             nocard: Some(1),
+            email: None,
         };
 
         let game_id = app_state.game.id().clone();
 
         // Register the client first time
-        let first_result = handle_register(Path(game_id.clone()), State(app_state.clone()), JsonExtractor(request.clone())).await;
+        let first_result = handle_join(Path(game_id.clone()), State(app_state.clone()), JsonExtractor(request.clone())).await;
         assert!(first_result.is_ok());
         let first_response = first_result.unwrap();
 
         // Try to register the same client again
-        let second_result = handle_register(Path(game_id.clone()), State(app_state.clone()), JsonExtractor(request)).await;
+        let second_result = handle_join(Path(game_id.clone()), State(app_state.clone()), JsonExtractor(request)).await;
         assert!(second_result.is_ok());
         let second_response = second_result.unwrap();
 
@@ -913,9 +961,10 @@ mod tests {
             name: "late_player".to_string(),
             client_type: "player".to_string(),
             nocard: Some(1),
+            email: None,
         };
 
-        let result = handle_register(Path(game_id), State(app_state.clone()), JsonExtractor(request)).await;
+        let result = handle_join(Path(game_id), State(app_state.clone()), JsonExtractor(request)).await;
 
         assert!(result.is_err());
         let error = result.unwrap_err();
@@ -932,7 +981,7 @@ mod tests {
             name: Some("info_test_player".to_string()),
         };
 
-        let result = handle_client_info(
+        let result = handle_global_clientinfo(
             State(app_state.clone()),
             Query(query),
         ).await;
@@ -952,7 +1001,7 @@ mod tests {
             name: Some("nonexistent_player".to_string()),
         };
 
-        let result = handle_client_info(
+        let result = handle_global_clientinfo(
             State(app_state.clone()),
             Query(query),
         ).await;
@@ -968,7 +1017,7 @@ mod tests {
         let app_state = create_test_app_state();
         let client_id = register_test_client(&app_state, "id_test_player").await;
 
-        let result = handle_client_info_by_id(
+        let result = handle_global_clientinfo_by_id(
             State(app_state.clone()),
             Path(client_id.clone()),
         ).await;
@@ -984,7 +1033,7 @@ mod tests {
     async fn test_handle_client_info_by_id_board_client() {
         let app_state = create_test_app_state();
 
-        let result = handle_client_info_by_id(
+        let result = handle_global_clientinfo_by_id(
             State(app_state.clone()),
             Path(BOARD_ID.to_string()),
         ).await;
@@ -1000,7 +1049,7 @@ mod tests {
     async fn test_handle_client_info_by_id_nonexistent() {
         let app_state = create_test_app_state();
 
-        let result = handle_client_info_by_id(
+        let result = handle_global_clientinfo_by_id(
             State(app_state.clone()),
             Path("invalid_client_id".to_string()),
         ).await;
@@ -1021,10 +1070,11 @@ mod tests {
             name: "cards_test_player".to_string(),
             client_type: "player".to_string(),
             nocard: Some(0), // No cards during registration
+            email: None,
         };
 
         let game_id = app_state.game.id().clone();
-        let register_result = handle_register(Path(game_id.clone()), State(app_state.clone()), JsonExtractor(register_request)).await;
+        let register_result = handle_join(Path(game_id.clone()), State(app_state.clone()), JsonExtractor(register_request)).await;
         assert!(register_result.is_ok());
         let client_id = register_result.unwrap().0.client_id;
 
@@ -1033,7 +1083,7 @@ mod tests {
 
         let request = GenerateCardsRequest { count: 3 };
 
-        let result = handle_generate_cards(
+        let result = handle_generatecards(
             State(app_state.clone()),
             Path(game_id),
             headers,
@@ -1054,7 +1104,7 @@ mod tests {
 
         let request = GenerateCardsRequest { count: 1 };
 
-        let result = handle_generate_cards(
+        let result = handle_generatecards(
             State(app_state.clone()),
             Path(game_id),
             headers,
@@ -1076,7 +1126,7 @@ mod tests {
 
         let request = GenerateCardsRequest { count: 1 };
 
-        let result = handle_generate_cards(
+        let result = handle_generatecards(
             State(app_state.clone()),
             Path(game_id),
             headers,
@@ -1098,7 +1148,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("X-Client-ID", client_id.parse().unwrap());
 
-        let result = handle_list_assigned_cards(
+        let result = handle_listassignedcards(
             State(app_state.clone()),
             Path(game_id),
             headers,
@@ -1117,7 +1167,7 @@ mod tests {
         let game_id = get_test_game_id(&app_state);
         let headers = HeaderMap::new(); // No X-Client-ID header
 
-        let result = handle_list_assigned_cards(
+        let result = handle_listassignedcards(
             State(app_state.clone()),
             Path(game_id),
             headers,
@@ -1140,7 +1190,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("X-Client-ID", client_id.parse().unwrap());
 
-        let list_result = handle_list_assigned_cards(
+        let list_result = handle_listassignedcards(
             State(app_state.clone()),
             Path(game_id.clone()),
             headers.clone(),
@@ -1153,7 +1203,7 @@ mod tests {
 
         let card_id = &list_response.0.cards[0].card_id;
 
-        let result = handle_get_assigned_card(
+        let result = handle_getassignedcard(
             State(app_state.clone()),
             Path((game_id, card_id.clone())),
             headers,
@@ -1173,7 +1223,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("X-Client-ID", client_id.parse().unwrap());
 
-        let result = handle_get_assigned_card(
+        let result = handle_getassignedcard(
             State(app_state.clone()),
             Path((game_id, "nonexistent_card_id".to_string())),
             headers,
@@ -1404,7 +1454,7 @@ mod tests {
         // Get initial game count
         let initial_count = app_state.game_registry.total_games().unwrap();
 
-        let result = handle_newgame(State(app_state.clone()), headers).await;
+        let result = handle_global_newgame(State(app_state.clone()), headers).await;
 
         assert!(result.is_ok());
         let response = result.unwrap();
@@ -1427,7 +1477,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("X-Client-ID", client_id.parse().unwrap()); // Regular client, not board
 
-        let result = handle_newgame(State(app_state.clone()), headers).await;
+        let result = handle_global_newgame(State(app_state.clone()), headers).await;
 
         assert!(result.is_err());
         let error = result.unwrap_err();
@@ -1515,7 +1565,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("X-Client-ID", client_id.parse().unwrap());
 
-        let cards_result = handle_list_assigned_cards(
+        let cards_result = handle_listassignedcards(
             State(app_state.clone()),
             Path(game_id.clone()),
             headers.clone(),
@@ -1527,7 +1577,7 @@ mod tests {
 
         // Get specific card
         let card_id = &cards.0.cards[0].card_id;
-        let card_result = handle_get_assigned_card(
+        let card_result = handle_getassignedcard(
             State(app_state.clone()),
             Path((game_id.clone(), card_id.clone())),
             headers.clone(),
@@ -1568,11 +1618,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handle_games_list() {
+    async fn test_handle_global_gameslist() {
         let app_state = create_test_app_state();
 
         // Test the games list endpoint
-        let result = handle_games_list(State(app_state.clone())).await;
+        let result = handle_global_gameslist(State(app_state.clone())).await;
         assert!(result.is_ok());
 
         let response = result.unwrap();
@@ -1627,7 +1677,7 @@ mod tests {
         let _ = app_state.game_registry.add_game(closed_arc.clone());
 
         // Test the games list endpoint
-        let result = handle_games_list(State(app_state.clone())).await;
+        let result = handle_global_gameslist(State(app_state.clone())).await;
         assert!(result.is_ok());
 
         let response = result.unwrap();
@@ -1679,7 +1729,7 @@ mod tests {
 
         for i in 1..=3 {
             println!("📝 Creating game {i}");
-            let newgame_result = handle_newgame(State(app_state.clone()), board_headers.clone()).await;
+            let newgame_result = handle_global_newgame(State(app_state.clone()), board_headers.clone()).await;
             assert!(newgame_result.is_ok(), "Failed to create game {i}");
 
             let newgame_response = newgame_result.unwrap();
@@ -1689,7 +1739,7 @@ mod tests {
         }
 
         // Verify we have 4 games total (original + 3 new)
-        let games_list_result = handle_games_list(State(app_state.clone())).await;
+        let games_list_result = handle_global_gameslist(State(app_state.clone())).await;
         assert!(games_list_result.is_ok());
         let games_list_response = games_list_result.unwrap();
         assert_eq!(games_list_response["total_games"], 4);
@@ -1711,9 +1761,10 @@ mod tests {
                     name: client_name.clone(),
                     client_type: "player".to_string(),
                     nocard: Some(6), // Request 6 cards during registration
+                    email: None,
                 };
 
-                let register_result = handle_register(
+                let register_result = handle_join(
                     Path(game_id.clone()),
                     State(app_state.clone()),
                     JsonExtractor(register_request)
@@ -1733,7 +1784,7 @@ mod tests {
                 let mut client_headers = HeaderMap::new();
                 client_headers.insert("X-Client-ID", client_id.parse().unwrap());
 
-                let list_cards_result = handle_list_assigned_cards(
+                let list_cards_result = handle_listassignedcards(
                     State(app_state.clone()),
                     Path(game_id.clone()),
                     client_headers.clone(),
@@ -1747,7 +1798,7 @@ mod tests {
 
                 // Get one card to verify it belongs to this client
                 let card_id = &cards_response.cards[0].card_id;
-                let get_card_result = handle_get_assigned_card(
+                let get_card_result = handle_getassignedcard(
                     State(app_state.clone()),
                     Path((game_id.clone(), card_id.clone())),
                     client_headers,
@@ -1835,7 +1886,7 @@ mod tests {
                 let mut client_headers = HeaderMap::new();
                 client_headers.insert("X-Client-ID", client_id.parse().unwrap());
 
-                let final_cards_result = handle_list_assigned_cards(
+                let final_cards_result = handle_listassignedcards(
                     State(app_state.clone()),
                     Path(game_id.clone()),
                     client_headers,
@@ -1853,7 +1904,7 @@ mod tests {
         // Step 4: Final verification - check games list shows all games as closed
         println!("\n📋 Final verification of all games");
 
-        let final_games_list = handle_games_list(State(app_state.clone())).await;
+        let final_games_list = handle_global_gameslist(State(app_state.clone())).await;
         assert!(final_games_list.is_ok());
         let final_response = final_games_list.unwrap();
 
@@ -1900,13 +1951,13 @@ mod tests {
         board_headers.insert("X-Client-ID", BOARD_ID.parse().unwrap());
 
         // Create first new game
-        let newgame1_result = handle_newgame(State(app_state.clone()), board_headers.clone()).await;
+        let newgame1_result = handle_global_newgame(State(app_state.clone()), board_headers.clone()).await;
         assert!(newgame1_result.is_ok(), "Failed to create first game");
         let game1_id = newgame1_result.unwrap()["game_id"].as_str().unwrap().to_string();
         println!("✅ Created first game: {game1_id}");
 
         // Create second new game
-        let newgame2_result = handle_newgame(State(app_state.clone()), board_headers.clone()).await;
+        let newgame2_result = handle_global_newgame(State(app_state.clone()), board_headers.clone()).await;
         assert!(newgame2_result.is_ok(), "Failed to create second game");
         let game2_id = newgame2_result.unwrap()["game_id"].as_str().unwrap().to_string();
         println!("✅ Created second game: {game2_id}");
@@ -1917,9 +1968,10 @@ mod tests {
             name: client_name.to_string(),
             client_type: "player".to_string(),
             nocard: Some(2),
+            email: None,
         };
 
-        let register1_result = handle_register(
+        let register1_result = handle_join(
             Path(game1_id.clone()),
             State(app_state.clone()),
             JsonExtractor(register_request.clone())
@@ -1931,7 +1983,7 @@ mod tests {
         println!("👤 Registered {client_name} to game1 with ID: {client_id_game1}");
 
         // Step 3: Register the same client to the second game
-        let register2_result = handle_register(
+        let register2_result = handle_join(
             Path(game2_id.clone()),
             State(app_state.clone()),
             JsonExtractor(register_request.clone())
@@ -1952,7 +2004,7 @@ mod tests {
             name: Some(client_name.to_string()),
         };
 
-        let clientinfo_by_name_result = handle_client_info(
+        let clientinfo_by_name_result = handle_global_clientinfo(
             State(app_state.clone()),
             Query(client_info_by_name_query),
         ).await;
@@ -1965,7 +2017,7 @@ mod tests {
         println!("🔍 VERIFIED: Global clientinfo by name works correctly");
 
         // Step 6: Test global clientinfo endpoint by ID
-        let clientinfo_by_id_result = handle_client_info_by_id(
+        let clientinfo_by_id_result = handle_global_clientinfo_by_id(
             State(app_state.clone()),
             Path(client_id_game1.clone()),
         ).await;
@@ -1982,7 +2034,7 @@ mod tests {
         client_headers.insert("X-Client-ID", client_id_game1.parse().unwrap());
 
         // Check cards in game1
-        let cards1_result = handle_list_assigned_cards(
+        let cards1_result = handle_listassignedcards(
             State(app_state.clone()),
             Path(game1_id.clone()),
             client_headers.clone(),
@@ -1995,7 +2047,7 @@ mod tests {
         println!("🃏 VERIFIED: Client has 2 cards in game1");
 
         // Check cards in game2
-        let cards2_result = handle_list_assigned_cards(
+        let cards2_result = handle_listassignedcards(
             State(app_state.clone()),
             Path(game2_id.clone()),
             client_headers.clone(),
@@ -2013,9 +2065,10 @@ mod tests {
             name: different_client_name.to_string(),
             client_type: "player".to_string(),
             nocard: Some(1),
+            email: None,
         };
 
-        let different_register_result = handle_register(
+        let different_register_result = handle_join(
             Path(game1_id.clone()),
             State(app_state.clone()),
             JsonExtractor(different_register_request)
@@ -2028,7 +2081,7 @@ mod tests {
         println!("👥 VERIFIED: Different client has different ID: {different_client_id}");
 
         // Step 9: Test clientinfo endpoint with non-existent client
-        let nonexistent_result = handle_client_info_by_id(
+        let nonexistent_result = handle_global_clientinfo_by_id(
             State(app_state.clone()),
             Path("NONEXISTENT_ID".to_string()),
         ).await;
@@ -2040,7 +2093,7 @@ mod tests {
         println!("❌ VERIFIED: Non-existent client ID returns proper error");
 
         // Step 10: Verify both clients are in global registry
-        let global_client_info_result = handle_client_info(
+        let global_client_info_result = handle_global_clientinfo(
             State(app_state.clone()),
             Query(ClientNameQuery { name: Some(different_client_name.to_string()) }),
         ).await;
@@ -2058,5 +2111,186 @@ mod tests {
         println!("   ✅ Different clients get different IDs");
         println!("   ✅ Proper error handling for non-existent clients");
         println!("   ✅ Global client registry maintains all clients");
+    }
+
+    #[tokio::test]
+    async fn test_handle_global_register_new_client() {
+        let app_state = create_test_app_state();
+        let request = RegisterRequest {
+            name: "global_new_player".to_string(),
+            client_type: "player".to_string(),
+            nocard: Some(0), // Not used in global registration
+            email: None,
+        };
+
+        let result = handle_global_register(State(app_state.clone()), JsonExtractor(request)).await;
+
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert_eq!(response.message, "Client 'global_new_player' registered successfully globally");
+        assert!(!response.client_id.is_empty());
+
+        // Verify client was added to global registry
+        let client_info = app_state.global_client_registry.get_by_name("global_new_player").unwrap();
+        assert!(client_info.is_some());
+        let client = client_info.unwrap();
+        assert_eq!(client.name, "global_new_player");
+        assert_eq!(client.client_type, "player");
+        assert_eq!(client.email, ""); // Empty since None was provided
+    }
+
+    #[tokio::test]
+    async fn test_handle_global_register_with_email() {
+        let app_state = create_test_app_state();
+        let request = RegisterRequest {
+            name: "global_email_player".to_string(),
+            client_type: "player".to_string(),
+            nocard: Some(0),
+            email: Some("test@example.com".to_string()),
+        };
+
+        let result = handle_global_register(State(app_state.clone()), JsonExtractor(request)).await;
+
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert_eq!(response.message, "Client 'global_email_player' registered successfully globally");
+
+        // Verify client was added to global registry with email
+        let client_info = app_state.global_client_registry.get_by_name("global_email_player").unwrap();
+        assert!(client_info.is_some());
+        let client = client_info.unwrap();
+        assert_eq!(client.name, "global_email_player");
+        assert_eq!(client.client_type, "player");
+        assert_eq!(client.email, "test@example.com");
+    }
+
+    #[tokio::test]
+    async fn test_handle_global_register_existing_client() {
+        let app_state = create_test_app_state();
+        
+        // First registration
+        let request1 = RegisterRequest {
+            name: "global_existing_player".to_string(),
+            client_type: "player".to_string(),
+            nocard: Some(0),
+            email: Some("first@example.com".to_string()),
+        };
+
+        let result1 = handle_global_register(State(app_state.clone()), JsonExtractor(request1)).await;
+        assert!(result1.is_ok());
+        let response1 = result1.unwrap();
+        let first_client_id = response1.client_id.clone();
+
+        // Second registration with same name but different email
+        let request2 = RegisterRequest {
+            name: "global_existing_player".to_string(),
+            client_type: "admin".to_string(), // Different type
+            nocard: Some(0),
+            email: Some("second@example.com".to_string()), // Different email
+        };
+
+        let result2 = handle_global_register(State(app_state.clone()), JsonExtractor(request2)).await;
+        assert!(result2.is_ok());
+        let response2 = result2.unwrap();
+
+        // Should return the same client ID and indicate already registered
+        assert_eq!(response2.client_id, first_client_id);
+        assert_eq!(response2.message, "Client 'global_existing_player' already registered globally");
+
+        // Verify original client info is preserved (not updated)
+        let client_info = app_state.global_client_registry.get_by_name("global_existing_player").unwrap();
+        assert!(client_info.is_some());
+        let client = client_info.unwrap();
+        assert_eq!(client.client_type, "player"); // Original type preserved
+        assert_eq!(client.email, "first@example.com"); // Original email preserved
+    }
+
+    #[tokio::test]
+    async fn test_handle_global_register_different_client_types() {
+        let app_state = create_test_app_state();
+
+        // Register a player
+        let player_request = RegisterRequest {
+            name: "test_player".to_string(),
+            client_type: "player".to_string(),
+            nocard: Some(0),
+            email: None,
+        };
+
+        let player_result = handle_global_register(State(app_state.clone()), JsonExtractor(player_request)).await;
+        assert!(player_result.is_ok());
+
+        // Register an admin
+        let admin_request = RegisterRequest {
+            name: "test_admin".to_string(),
+            client_type: "admin".to_string(),
+            nocard: Some(0),
+            email: Some("admin@company.com".to_string()),
+        };
+
+        let admin_result = handle_global_register(State(app_state.clone()), JsonExtractor(admin_request)).await;
+        assert!(admin_result.is_ok());
+
+        // Verify both are in registry with correct types
+        let player_info = app_state.global_client_registry.get_by_name("test_player").unwrap().unwrap();
+        assert_eq!(player_info.client_type, "player");
+        assert_eq!(player_info.email, "");
+
+        let admin_info = app_state.global_client_registry.get_by_name("test_admin").unwrap().unwrap();
+        assert_eq!(admin_info.client_type, "admin");
+        assert_eq!(admin_info.email, "admin@company.com");
+
+        // Ensure they have different IDs
+        assert_ne!(player_info.id, admin_info.id);
+    }
+
+    #[tokio::test]
+    async fn test_handle_global_register_integration_with_game_registration() {
+        let app_state = create_test_app_state();
+        let game_id = app_state.game.id().clone();
+
+        // Step 1: Register client globally first
+        let global_request = RegisterRequest {
+            name: "integration_test_player".to_string(),
+            client_type: "player".to_string(),
+            nocard: Some(0),
+            email: Some("integration@test.com".to_string()),
+        };
+
+        let global_result = handle_global_register(State(app_state.clone()), JsonExtractor(global_request)).await;
+        assert!(global_result.is_ok());
+        let global_response = global_result.unwrap();
+        let global_client_id = global_response.client_id.clone();
+
+        // Step 2: Register the same client to a specific game
+        let game_request = RegisterRequest {
+            name: "integration_test_player".to_string(),
+            client_type: "player".to_string(), // Same type
+            nocard: Some(2), // Request cards for game
+            email: None, // Different email (should be ignored)
+        };
+
+        let game_result = handle_join(Path(game_id.clone()), State(app_state.clone()), JsonExtractor(game_request)).await;
+        assert!(game_result.is_ok());
+        let game_response = game_result.unwrap();
+
+        // Should use the same client ID from global registry
+        assert_eq!(game_response.client_id, global_client_id);
+        assert!(game_response.message.contains("registered successfully"));
+
+        // Verify client info comes from global registry
+        let client_info = app_state.global_client_registry.get_by_name("integration_test_player").unwrap().unwrap();
+        assert_eq!(client_info.id, global_client_id);
+        assert_eq!(client_info.email, "integration@test.com"); // Original email preserved
+
+        // Verify client is registered in the game and has cards
+        assert!(app_state.game.contains_client(&global_client_id));
+        
+        // Check that cards were assigned during game registration
+        if let Ok(manager) = app_state.game.card_manager().lock() {
+            let client_cards = manager.get_client_cards(&global_client_id);
+            assert!(client_cards.is_some());
+            assert_eq!(client_cards.unwrap().len(), 2); // 2 cards requested
+        }
     }
 }
