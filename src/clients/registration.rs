@@ -39,6 +39,7 @@ pub async fn join_client(
 }
 
 /// Register a client globally (without joining a specific game)
+#[allow(dead_code)]
 pub async fn register_client(
     server_url: &str,
     client_name: &str,

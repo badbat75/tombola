@@ -34,7 +34,7 @@ The Tombola server now supports multiple concurrent games through a **GameRegist
 
 #### Game-Specific API Routing
 - **Path-Based Routing**: All game operations use `/{game_id}/` routing for isolation
-- **Client Registration Per Game**: Clients register to specific games using `/{game_id}/register`
+- **Client Registration Per Game**: Clients register to specific games using `/{game_id}/join`
 - **Independent Game States**: Each game maintains separate Board, Pouch, ScoreCard, and Client registries
 - **Game Management**: Create new games via `/newgame`, list all games via `/gameslist`
 - **Cross-Game Client Support**: Clients can participate in multiple games simultaneously
@@ -52,7 +52,7 @@ The Tombola server now supports multiple concurrent games through a **GameRegist
 - **Manual Dumps**: Admin can trigger dumps via `/{game_id}/dumpgame` endpoint
 - **File Format**: `game_{game_id}.json` with pretty-printed JSON
 - **Complete State**: Includes board, pouch, scorecard, client registry, and card assignments
-- **Security**: Only board client (ID: "0000000000000000") can trigger manual dumps
+- **Security**: Only registered board clients (client_type "board") can trigger manual dumps
 
 ### Configuration Management (`src/config.rs`)
 - `ServerConfig`: Host/port configuration with defaults (127.0.0.1:3000)

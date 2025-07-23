@@ -466,14 +466,28 @@ impl CardManagement {
     }
 
     /// Generate cards and handle complete assignment process
-    pub fn generate_and_assign_cards(&self, count: u32, client_id: &str) -> (Vec<CardInfo>, Vec<String>, Vec<CardAssignment>) {
-        let cards_with_ids = self.generate_cards(count as usize);
+    pub fn generate_and_assign_cards(&self, count: u32, client_id: &str, client_type: Option<&str>) -> (Vec<CardInfo>, Vec<String>, Vec<CardAssignment>) {
+        // Check if this is a board client
+        let is_board_client = client_type == Some("board");
+        
+        let cards_with_ids = if is_board_client {
+            // For board clients, generate a special board card with BOARD_ID
+            self.generate_board_card()
+        } else {
+            self.generate_cards(count as usize)
+        };
+        
         let mut card_infos = Vec::new();
         let mut client_card_ids = Vec::new();
         let mut assignments = Vec::new();
 
         for card_with_id in cards_with_ids {
-            let card_id_str = format!("{:016X}", card_with_id.id);
+            let card_id_str = if is_board_client {
+                // Use the constant BOARD_ID for board clients
+                BOARD_ID.to_string()
+            } else {
+                format!("{:016X}", card_with_id.id)
+            };
 
             // Add to client's card list (clone needed for multiple uses)
             client_card_ids.push(card_id_str.clone());
@@ -497,6 +511,39 @@ impl CardManagement {
         }
 
         (card_infos, client_card_ids, assignments)
+    }
+
+    // Generate a special board card for board clients
+    fn generate_board_card(&self) -> Vec<CardWithId> {
+        // Create a special card that represents the entire board
+        let card = self.create_board_card();
+        vec![CardWithId {
+            id: 0, // Special ID that will be replaced with BOARD_ID
+            card,
+        }]
+    }
+
+    // Create the board card data representing the entire game board
+    fn create_board_card(&self) -> Card {
+        let mut card = Vec::new();
+        let total_rows = BOARDCONFIG.cards_per_col as usize * BOARDCONFIG.rows_per_card as usize;
+        let total_cols = BOARDCONFIG.cards_per_row as usize * BOARDCONFIG.cols_per_card as usize;
+
+        for row in 0..total_rows {
+            let mut card_row = Vec::new();
+            for col in 0..total_cols {
+                // Calculate the number for this position
+                let number = FIRSTNUMBER + (row * total_cols + col) as Number;
+                if number <= LASTNUMBER {
+                    card_row.push(Some(number));
+                } else {
+                    card_row.push(None);
+                }
+            }
+            card.push(card_row);
+        }
+
+        card
     }
 }
 
@@ -522,8 +569,12 @@ impl CardAssignmentManager {
     }
 
     pub fn assign_cards(&mut self, client_id: &str, count: u32) -> (Vec<CardInfo>, Vec<String>) {
+        self.assign_cards_with_type(client_id, count, None)
+    }
+
+    pub fn assign_cards_with_type(&mut self, client_id: &str, count: u32, client_type: Option<&str>) -> (Vec<CardInfo>, Vec<String>) {
         let card_management = CardManagement::new();
-        let (card_infos, client_card_ids, assignments) = card_management.generate_and_assign_cards(count, client_id);
+        let (card_infos, client_card_ids, assignments) = card_management.generate_and_assign_cards(count, client_id, client_type);
 
         // Store assignments
         for assignment in assignments {
@@ -590,13 +641,15 @@ impl CardAssignmentManager {
 
     // Helper function to get client ID from card ID
     pub fn get_client_id_for_card(&self, card_id: &str) -> String {
-        if card_id == BOARD_ID {
-            return board_client_id(); // Special ID for board
-        }
-
         if let Some(assignment) = self.get_card_assignment(card_id) {
             return assignment.client_id.to_string();
         }
+        
+        // Fallback for unknown cards
+        if card_id == BOARD_ID {
+            return board_client_id(); // Backward compatibility fallback
+        }
+        
         "Unknown".to_string()
     }
 

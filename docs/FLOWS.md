@@ -78,7 +78,7 @@ sequenceDiagram
         BC->>S: GET /{game_id}/status
         S-->>BC: Game state for specific game
 
-        PC->>S: POST /{game_id}/register
+        PC->>S: POST /{game_id}/join
         Note over PC: {"name": "player1", "client_type": "player"}
         S-->>PC: Registration successful (client_id)
 
@@ -91,7 +91,7 @@ sequenceDiagram
 
         Note over BC: User presses key to extract number
         BC->>S: POST /{game_id}/extract
-        Note over BC: Using special client ID "0000000000000000"
+        Note over BC: Using registered board client ID
         S-->>BC: Number extracted from pouch for this game
 
         BC->>S: GET /{game_id}/board
@@ -110,7 +110,7 @@ sequenceDiagram
     participant BC as Board Client
 
     BC->>S: POST /newgame
-    Note over BC: Using special client ID "0000000000000000"
+    Note over BC: Using registered board client ID
     S-->>BC: New game created with unique game_id
 
     Note over S: GameRegistry adds new game instance:
@@ -224,7 +224,7 @@ sequenceDiagram
         Note over BC: Display state once and exit
         BC-->>BC: Exit (no loop)
 
-        PC->>S: POST /{game_id}/register
+        PC->>S: POST /{game_id}/join
         Note over PC: {"name": "monitor", "client_type": "player"}
         S-->>PC: Registration successful for specific game
 
@@ -255,7 +255,7 @@ sequenceDiagram
     Note over S: Server running with existing games in GameRegistry
 
     BC->>S: POST /newgame
-    Note over BC: Using special client ID "0000000000000000"
+    Note over BC: Using registered board client ID
     S-->>BC: New game created with unique game_id
 
     Note over S: GameRegistry creates new game instance:
@@ -285,16 +285,18 @@ sequenceDiagram
 
 ## Client Authentication
 
-### Special Client IDs
+### Client Authentication and Registration
 
-- **Board Client**: Uses special client ID `"0000000000000000"` (16 zeros)
+- **Board Clients**: Register with client_type "board"
+  - Must register to each game they want to manage via `/{game_id}/join`
+  - Receive special BOARD_ID card (`"0000000000000000"`) during registration
   - Can perform extractions via `/{game_id}/extract`
   - Can create new games via `/newgame`
   - Can dump game state via `/{game_id}/dumpgame`
-  - No registration required for any game
 
-- **Player Clients**: Use dynamically generated 16-character hexadecimal IDs
-  - Must register via `/{game_id}/register` before accessing game-specific endpoints
+- **Player Clients**: Register with client_type "player"
+  - Must register via `/{game_id}/join` before accessing game-specific endpoints
+  - Receive regular numbered cards during registration
   - Cannot extract numbers or create games
   - Can only access their own assigned cards within specific games
   - Must register separately for each game they want to join
@@ -329,7 +331,7 @@ sequenceDiagram
 - `GET /{game_id}/board` - Current extracted numbers for game
 - `GET /{game_id}/pouch` - Remaining numbers in pouch for game
 - `GET /{game_id}/scoremap` - Current scorecard and achievements for game
-- `POST /{game_id}/register` - Client registration to specific game
+- `POST /{game_id}/join` - Client registration to specific game
 
 ### Game-Specific Authenticated Endpoints (Require X-Client-ID)
 - `POST /{game_id}/extract` - Extract number from pouch (Board Client only)
@@ -348,7 +350,7 @@ sequenceDiagram
     participant S as Server (GameRegistry)
 
     alt Registration after extraction in specific game
-        C->>S: POST /{game_id}/register
+        C->>S: POST /{game_id}/join
         Note over S: Numbers already extracted in this game
         S-->>C: 409 Conflict
     end
@@ -449,7 +451,7 @@ sequenceDiagram
 - **Game Isolation**: Each game file contains only that game's data
 
 ### Security Considerations
-- Only the Board Client (ID: "0000000000000000") can trigger manual dumps via `/{game_id}/dumpgame`
+- Only registered board clients (client_type "board") can trigger manual dumps via `/{game_id}/dumpgame`
 - Automatic dumps occur without authentication requirements
 - Game files are stored locally in the server's file system
 - Each game's data is completely isolated from other games

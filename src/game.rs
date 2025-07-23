@@ -21,6 +21,104 @@ use crate::card::CardAssignmentManager;
 use crate::defs::Number;
 use crate::extraction::perform_extraction;
 
+/// Game-specific client type association
+/// This allows clients to have different types in different games
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GameClientType {
+    pub client_id: String,
+    pub client_type: String, // "board", "player", etc.
+}
+
+/// Game-specific client type registry
+/// Manages client types within a specific game context
+#[derive(Debug, Clone)]
+pub struct GameClientTypeRegistry {
+    /// HashMap mapping client_id -> client_type for this specific game
+    client_types: Arc<Mutex<HashMap<String, String>>>,
+}
+
+impl GameClientTypeRegistry {
+    /// Create a new empty client type registry
+    pub fn new() -> Self {
+        Self {
+            client_types: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Set the client type for a client in this game
+    pub fn set_client_type(&self, client_id: &str, client_type: &str) -> Result<(), String> {
+        let mut types_lock = self.client_types.lock()
+            .map_err(|_| "Failed to lock client types registry")?;
+        
+        types_lock.insert(client_id.to_string(), client_type.to_string());
+        Ok(())
+    }
+
+    /// Get the client type for a client in this game
+    pub fn get_client_type(&self, client_id: &str) -> Result<Option<String>, String> {
+        let types_lock = self.client_types.lock()
+            .map_err(|_| "Failed to lock client types registry")?;
+        
+        Ok(types_lock.get(client_id).cloned())
+    }
+
+    /// Remove a client's type association from this game
+    pub fn remove_client_type(&self, client_id: &str) -> Result<Option<String>, String> {
+        let mut types_lock = self.client_types.lock()
+            .map_err(|_| "Failed to lock client types registry")?;
+        
+        Ok(types_lock.remove(client_id))
+    }
+
+    /// Get all clients of a specific type in this game
+    pub fn get_clients_by_type(&self, client_type: &str) -> Result<Vec<String>, String> {
+        let types_lock = self.client_types.lock()
+            .map_err(|_| "Failed to lock client types registry")?;
+        
+        let clients: Vec<String> = types_lock
+            .iter()
+            .filter(|(_, ctype)| *ctype == client_type)
+            .map(|(client_id, _)| client_id.clone())
+            .collect();
+        
+        Ok(clients)
+    }
+
+    /// Check if a client has a specific type in this game
+    pub fn is_client_type(&self, client_id: &str, client_type: &str) -> Result<bool, String> {
+        let types_lock = self.client_types.lock()
+            .map_err(|_| "Failed to lock client types registry")?;
+        
+        Ok(types_lock.get(client_id).map_or(false, |ctype| ctype == client_type))
+    }
+
+    /// Get all client type associations in this game
+    pub fn get_all_client_types(&self) -> Result<Vec<GameClientType>, String> {
+        let types_lock = self.client_types.lock()
+            .map_err(|_| "Failed to lock client types registry")?;
+        
+        let client_types: Vec<GameClientType> = types_lock
+            .iter()
+            .map(|(client_id, client_type)| GameClientType {
+                client_id: client_id.clone(),
+                client_type: client_type.clone(),
+            })
+            .collect();
+        
+        Ok(client_types)
+    }
+
+    /// Clear all client type associations for this game
+    pub fn clear(&self) -> Result<usize, String> {
+        let mut types_lock = self.client_types.lock()
+            .map_err(|_| "Failed to lock client types registry")?;
+        
+        let count = types_lock.len();
+        types_lock.clear();
+        Ok(count)
+    }
+}
+
 /// Represents the current status of a game
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GameStatus {
@@ -330,6 +428,7 @@ pub struct Game {
     scorecard: Arc<Mutex<ScoreCard>>,
     registered_clients: Arc<Mutex<HashSet<String>>>,  // Just store client IDs
     card_manager: Arc<Mutex<CardAssignmentManager>>,
+    client_type_registry: GameClientTypeRegistry,  // Game-specific client types
 }
 
 impl Game {
@@ -347,6 +446,7 @@ impl Game {
             scorecard: Arc::new(Mutex::new(ScoreCard::new())),
             registered_clients: Arc::new(Mutex::new(HashSet::new())),
             card_manager: Arc::new(Mutex::new(CardAssignmentManager::new())),
+            client_type_registry: GameClientTypeRegistry::new(),
         }
     }
 
@@ -474,6 +574,38 @@ impl Game {
         } else {
             false
         }
+    }
+
+    // Game-specific client type management methods
+
+    /// Set the client type for a client in this specific game
+    pub fn set_client_type(&self, client_id: &str, client_type: &str) -> Result<(), String> {
+        self.client_type_registry.set_client_type(client_id, client_type)
+    }
+
+    /// Get the client type for a client in this specific game
+    pub fn get_client_type(&self, client_id: &str) -> Result<Option<String>, String> {
+        self.client_type_registry.get_client_type(client_id)
+    }
+
+    /// Check if a client has a specific type in this game
+    pub fn is_client_type(&self, client_id: &str, client_type: &str) -> Result<bool, String> {
+        self.client_type_registry.is_client_type(client_id, client_type)
+    }
+
+    /// Get all clients of a specific type in this game
+    pub fn get_clients_by_type(&self, client_type: &str) -> Result<Vec<String>, String> {
+        self.client_type_registry.get_clients_by_type(client_type)
+    }
+
+    /// Get all client type associations in this game
+    pub fn get_all_client_types(&self) -> Result<Vec<GameClientType>, String> {
+        self.client_type_registry.get_all_client_types()
+    }
+
+    /// Remove a client's type association from this game
+    pub fn remove_client_type(&self, client_id: &str) -> Result<Option<String>, String> {
+        self.client_type_registry.remove_client_type(client_id)
     }
 
     /// Get a reference to the card manager Arc<Mutex<CardAssignmentManager>>

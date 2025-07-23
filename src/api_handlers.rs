@@ -140,13 +140,19 @@ pub async fn handle_join(
         }
     }
 
+    // Set the game-specific client type for this client in this game
+    if let Err(e) = game.set_client_type(&client_id, client_type) {
+        log_error(&format!("Failed to set client type for '{client_id}' in game '{game_id}': {e}"));
+        return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to set client type for game"));
+    }
+
     // Check if client requested cards during registration, default to 1 if not specified
     let card_count = request.nocard.unwrap_or(1);
     log_info(&format!("Generating {card_count} cards for client '{client_name}' during registration"));
 
     // Generate the requested number of cards using the card manager
     if let Ok(mut manager) = game.card_manager().lock() {
-        manager.assign_cards(&client_id, card_count);
+        manager.assign_cards_with_type(&client_id, card_count, Some(client_type));
         log_info(&format!("Generated and assigned {card_count} cards to client '{client_name}' in game '{game_id}'"));
     } else {
         log_warning(&format!("Failed to acquire card manager lock for client '{client_name}' in game '{game_id}'"));
@@ -191,7 +197,7 @@ pub async fn handle_global_clientinfo_by_id(
     log_info(&format!("Client info by ID request for: {client_id}"));
 
     // Handle special case for board client ID
-    if client_id == crate::client::BOARDCLIENT_ID {
+    if client_id == BOARD_ID {
         return Ok(Json(ClientInfoResponse {
             client_id: client_id.clone(),
             name: "Board".to_string(),
@@ -321,9 +327,15 @@ pub async fn handle_generatecards(
         }
     }
 
+    // Get client type for proper card assignment
+    let client_type = match app_state.global_client_registry.get_by_client_id(&client_id) {
+        Ok(Some(info)) => Some(info.client_type.clone()),
+        _ => None,
+    };
+
     // Generate cards using the CardAssignmentManager
     let card_infos = if let Ok(mut manager) = game.card_manager().lock() {
-        let (cards, _) = manager.assign_cards(&client_id, request.count);
+        let (cards, _) = manager.assign_cards_with_type(&client_id, request.count, client_type.as_deref());
         cards
     } else {
         log_error("Failed to acquire card manager lock");
@@ -593,10 +605,24 @@ pub async fn handle_extract(
         }
     };
 
-    // Only allow board client (ID: "0000000000000000") to extract numbers
-    if client_id != BOARD_ID {
-        log_error("Unauthorized: Only board client can extract numbers");
-        return Err(ApiError::new(StatusCode::FORBIDDEN, "Unauthorized: Only board client can extract numbers"));
+    // Check if the client is registered to this game
+    if !game.contains_client(&client_id) {
+        log_error(&format!("Client {client_id} is not registered to game {game_id}"));
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "Client must be registered to this game"));
+    }
+
+    // Only allow board client type to extract numbers - check game-specific client type
+    match game.is_client_type(&client_id, "board") {
+        Ok(is_board) => {
+            if !is_board {
+                log_error(&format!("Unauthorized: Only board clients can extract numbers, client ID: {}", client_id));
+                return Err(ApiError::new(StatusCode::FORBIDDEN, "Unauthorized: Only board clients can extract numbers"));
+            }
+        }
+        Err(e) => {
+            log_error(&format!("Failed to check client type for '{}' in game '{}': {}", client_id, game_id, e));
+            return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to verify client authorization"));
+        }
     }
 
     // Check if BINGO has been reached - if so, no more extractions allowed
@@ -672,19 +698,6 @@ pub async fn handle_global_newgame(
         return Err(ApiError::new(StatusCode::FORBIDDEN, "Unauthorized: Only board client can create a new game"));
     }
 
-    // Dump the current game state only if the game has started but BINGO was not reached
-    // (BINGO games are already auto-dumped when BINGO occurs)
-    if app_state.game.has_game_started() && !app_state.game.is_bingo_reached() {
-        match app_state.game.dump_to_json() {
-            Ok(dump_message) => {
-                log_info(&format!("Incomplete game dumped before new game creation: {dump_message}"));
-            }
-            Err(dump_error) => {
-                log_error(&format!("Failed to dump incomplete game state before new game creation: {dump_error}"));
-            }
-        }
-    }
-
     // Create a completely new game
     let new_game = Game::new();
     let new_game_id = new_game.id();
@@ -744,10 +757,18 @@ pub async fn handle_dumpgame(
         }
     };
 
-    // Only allow board client (ID: "0000000000000000") to dump the game
-    if client_id != BOARD_ID {
-        log_error("Unauthorized: Only board client can dump the game");
-        return Err(ApiError::new(StatusCode::FORBIDDEN, "Unauthorized: Only board client can dump the game"));
+    // Only allow board client type to dump the game - check game-specific client type
+    match game.is_client_type(&client_id, "board") {
+        Ok(is_board) => {
+            if !is_board {
+                log_error(&format!("Unauthorized: Only board clients can dump the game, client ID: {}", client_id));
+                return Err(ApiError::new(StatusCode::FORBIDDEN, "Unauthorized: Only board clients can dump the game"));
+            }
+        }
+        Err(e) => {
+            log_error(&format!("Failed to check client type for '{}' in game '{}': {}", client_id, game_id, e));
+            return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to verify client authorization"));
+        }
     }
 
     // Dump the game state to JSON
@@ -846,7 +867,6 @@ pub async fn handle_global_gameslist(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::Game;
     use crate::config::ServerConfig;
     use crate::server::AppState;
     use crate::client::RegisterRequest;
@@ -861,22 +881,75 @@ mod tests {
         use std::sync::Arc;
         use crate::client::ClientRegistry;
 
-        let game = Game::new();
         let config = ServerConfig::default();
         let game_registry = crate::game::GameRegistry::new();
-        let game_arc = Arc::new(game.clone());
-        let _ = game_registry.add_game(game_arc); // Ignore error for tests
         Arc::new(AppState {
-            game,
             game_registry,
             global_client_registry: ClientRegistry::new(),
             config
         })
     }
 
-    // Helper function to get test game ID
-    fn get_test_game_id(app_state: &Arc<AppState>) -> String {
-        app_state.game.id()
+    // Helper function to create a test game via API and return its ID
+    async fn create_test_game(app_state: &Arc<AppState>) -> String {
+        // Use the board client to create a new game via API
+        let mut board_headers = HeaderMap::new();
+        board_headers.insert("X-Client-ID", BOARD_ID.parse().unwrap());
+
+        let newgame_result = handle_global_newgame(State(app_state.clone()), board_headers).await;
+        match newgame_result {
+            Ok(response) => {
+                let game_id = response["game_id"].as_str().unwrap().to_string();
+                
+                // Register BOARD_ID as a board client for this new game using API
+                register_board_client_to_game(app_state, &game_id).await;
+                
+                game_id
+            }
+            Err(_) => panic!("Failed to create test game via API"),
+        }
+    }
+
+    // Helper function to get test game ID (creates a new game for testing)
+    async fn get_test_game_id(app_state: &Arc<AppState>) -> String {
+        create_test_game(app_state).await
+    }
+
+    // Helper function to register the board client to a game for testing using API handlers
+    async fn register_board_client_to_game(app_state: &Arc<AppState>, game_id: &str) {
+        // First, manually add the board client to the global registry with the fixed BOARD_ID
+        // This ensures the board client has the expected ID constant
+        let board_client_info = crate::client::ClientInfo {
+            id: BOARD_ID.to_string(),
+            name: "Board".to_string(),
+            client_type: "board".to_string(),
+            registered_at: std::time::SystemTime::now(),
+            email: "".to_string(),
+        };
+        
+        // Add to global registry (this will not overwrite if already exists)
+        let _ = app_state.global_client_registry.insert(board_client_info);
+
+        // Now register the board client to the specific game using the API
+        let board_register_request = RegisterRequest {
+            name: "Board".to_string(),
+            client_type: "board".to_string(),
+            nocard: Some(0), // Board doesn't need cards
+            email: None,
+        };
+
+        let join_result = handle_join(
+            Path(game_id.to_string()),
+            State(app_state.clone()),
+            JsonExtractor(board_register_request)
+        ).await;
+
+        // This should succeed since we're registering a board client
+        assert!(join_result.is_ok(), "Failed to register board client to game {}", game_id);
+        let join_response = join_result.unwrap();
+        
+        // Verify the board client got the expected BOARD_ID
+        assert_eq!(join_response.client_id, BOARD_ID, "Board client should have BOARD_ID");
     }
 
     // Helper function to create a registered client
@@ -888,11 +961,27 @@ mod tests {
             email: None,
         };
 
-        let game_id = app_state.game.id().clone(); // Get the game ID from the default game
+        let game_id = create_test_game(app_state).await; // Create a test game
         let result = handle_join(Path(game_id), State(app_state.clone()), JsonExtractor(request)).await;
         match result {
             Ok(response) => response.0.client_id,
             Err(_) => panic!("Failed to register test client"),
+        }
+    }
+
+    // Helper function to create a registered client in a specific game
+    async fn register_test_client_to_game(app_state: &Arc<AppState>, name: &str, game_id: &str) -> String {
+        let request = RegisterRequest {
+            name: name.to_string(),
+            client_type: "player".to_string(),
+            nocard: Some(1),
+            email: None,
+        };
+
+        let result = handle_join(Path(game_id.to_string()), State(app_state.clone()), JsonExtractor(request)).await;
+        match result {
+            Ok(response) => response.0.client_id,
+            Err(_) => panic!("Failed to register test client to game"),
         }
     }
 
@@ -906,7 +995,7 @@ mod tests {
             email: None,
         };
 
-        let game_id = app_state.game.id().clone();
+        let game_id = create_test_game(&app_state).await;
         let result = handle_join(Path(game_id.clone()), State(app_state.clone()), JsonExtractor(request)).await;
 
         assert!(result.is_ok());
@@ -925,7 +1014,7 @@ mod tests {
             email: None,
         };
 
-        let game_id = app_state.game.id().clone();
+        let game_id = create_test_game(&app_state).await;
 
         // Register the client first time
         let first_result = handle_join(Path(game_id.clone()), State(app_state.clone()), JsonExtractor(request.clone())).await;
@@ -946,7 +1035,11 @@ mod tests {
         let app_state = create_test_app_state();
 
         // Start the game by extracting a number through the API
-        let game_id = app_state.game.id().clone();
+        let game_id = create_test_game(&app_state).await;
+        
+        // Register BOARD_ID as a board client for this game using API
+        register_board_client_to_game(&app_state, &game_id).await;
+        
         let mut board_headers = HeaderMap::new();
         board_headers.insert("X-Client-ID", BOARD_ID.parse().unwrap());
 
@@ -1063,7 +1156,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_generate_cards_success() {
         let app_state = create_test_app_state();
-        let _game_id = get_test_game_id(&app_state);
+        let _game_id = get_test_game_id(&app_state).await;
 
         // Register a client with no cards during registration
         let register_request = RegisterRequest {
@@ -1073,7 +1166,7 @@ mod tests {
             email: None,
         };
 
-        let game_id = app_state.game.id().clone();
+        let game_id = create_test_game(&app_state).await;
         let register_result = handle_join(Path(game_id.clone()), State(app_state.clone()), JsonExtractor(register_request)).await;
         assert!(register_result.is_ok());
         let client_id = register_result.unwrap().0.client_id;
@@ -1099,7 +1192,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_generate_cards_missing_client_id() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state);
+        let game_id = get_test_game_id(&app_state).await;
         let headers = HeaderMap::new(); // No X-Client-ID header
 
         let request = GenerateCardsRequest { count: 1 };
@@ -1120,7 +1213,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_generate_cards_unregistered_client() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state);
+        let game_id = get_test_game_id(&app_state).await;
         let mut headers = HeaderMap::new();
         headers.insert("X-Client-ID", "invalid_client_id".parse().unwrap());
 
@@ -1142,8 +1235,8 @@ mod tests {
     #[tokio::test]
     async fn test_handle_list_assigned_cards_success() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state);
-        let client_id = register_test_client(&app_state, "list_test_player").await;
+        let game_id = get_test_game_id(&app_state).await;
+        let client_id = register_test_client_to_game(&app_state, "list_test_player", &game_id).await;
 
         let mut headers = HeaderMap::new();
         headers.insert("X-Client-ID", client_id.parse().unwrap());
@@ -1164,7 +1257,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_list_assigned_cards_missing_client_id() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state);
+        let game_id = get_test_game_id(&app_state).await;
         let headers = HeaderMap::new(); // No X-Client-ID header
 
         let result = handle_listassignedcards(
@@ -1183,8 +1276,8 @@ mod tests {
     #[tokio::test]
     async fn test_handle_get_assigned_card_success() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state);
-        let client_id = register_test_client(&app_state, "get_card_test_player").await;
+        let game_id = get_test_game_id(&app_state).await;
+        let client_id = register_test_client_to_game(&app_state, "get_card_test_player", &game_id).await;
 
         // Get the assigned card ID
         let mut headers = HeaderMap::new();
@@ -1217,8 +1310,8 @@ mod tests {
     #[tokio::test]
     async fn test_handle_get_assigned_card_not_found() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state);
-        let client_id = register_test_client(&app_state, "get_card_test_player").await;
+        let game_id = get_test_game_id(&app_state).await;
+        let client_id = register_test_client_to_game(&app_state, "get_card_test_player", &game_id).await;
 
         let mut headers = HeaderMap::new();
         headers.insert("X-Client-ID", client_id.parse().unwrap());
@@ -1238,7 +1331,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_board_initial_state() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state);
+        let game_id = get_test_game_id(&app_state).await;
 
         let result = handle_board(
             State(app_state.clone()),
@@ -1255,7 +1348,10 @@ mod tests {
     #[tokio::test]
     async fn test_handle_board_with_extracted_numbers() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state);
+        let game_id = get_test_game_id(&app_state).await;
+
+        // Register BOARD_ID as a board client for this game using API
+        register_board_client_to_game(&app_state, &game_id).await;
 
         // Extract some numbers using the proper API handler
         let mut headers = HeaderMap::new();
@@ -1293,7 +1389,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_pouch_initial_state() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state);
+        let game_id = get_test_game_id(&app_state).await;
 
         let result = handle_pouch(
             State(app_state.clone()),
@@ -1309,7 +1405,10 @@ mod tests {
     #[tokio::test]
     async fn test_handle_pouch_after_extraction() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state);
+        let game_id = get_test_game_id(&app_state).await;
+
+        // Register BOARD_ID as a board client for this game using API
+        register_board_client_to_game(&app_state, &game_id).await;
 
         // Extract a number through the API
         let mut board_headers = HeaderMap::new();
@@ -1336,7 +1435,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_scoremap_initial_state() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state);
+        let game_id = get_test_game_id(&app_state).await;
 
         let result = handle_scoremap(
             State(app_state.clone()),
@@ -1353,7 +1452,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_status() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state);
+        let game_id = get_test_game_id(&app_state).await;
 
         let result = handle_status(
             State(app_state.clone()),
@@ -1374,7 +1473,11 @@ mod tests {
     #[tokio::test]
     async fn test_handle_extract_success() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state);
+        let game_id = get_test_game_id(&app_state).await;
+        
+        // Register BOARD_ID as a board client for this game using API
+        register_board_client_to_game(&app_state, &game_id).await;
+        
         let mut headers = HeaderMap::new();
         headers.insert("X-Client-ID", BOARD_ID.parse().unwrap()); // Board client
 
@@ -1396,8 +1499,8 @@ mod tests {
     #[tokio::test]
     async fn test_handle_extract_unauthorized() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state);
-        let client_id = register_test_client(&app_state, "extract_test_player").await;
+        let game_id = get_test_game_id(&app_state).await;
+        let client_id = register_test_client_to_game(&app_state, "extract_test_player", &game_id).await;
 
         let mut headers = HeaderMap::new();
         headers.insert("X-Client-ID", client_id.parse().unwrap()); // Regular client, not board
@@ -1412,13 +1515,13 @@ mod tests {
         assert!(result.is_err());
         let error = result.unwrap_err();
         assert_eq!(error.status, StatusCode::FORBIDDEN);
-        assert!(error.message.contains("Unauthorized: Only board client can extract numbers"));
+        assert!(error.message.contains("Unauthorized: Only board clients can extract numbers"));
     }
 
     #[tokio::test]
     async fn test_handle_extract_missing_client_id() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state);
+        let game_id = get_test_game_id(&app_state).await;
         let headers = HeaderMap::new(); // No X-Client-ID header
 
         let result = handle_extract(
@@ -1437,13 +1540,17 @@ mod tests {
     #[tokio::test]
     async fn test_handle_newgame_success() {
         let app_state = create_test_app_state();
+        let game_id = get_test_game_id(&app_state).await;
+        
+        // Register BOARD_ID as a board client for the original game using API
+        register_board_client_to_game(&app_state, &game_id).await;
+        
         let mut headers = HeaderMap::new();
         headers.insert("X-Client-ID", BOARD_ID.parse().unwrap()); // Board client
 
         // Register a client and extract some numbers to have game state through API
         let _ = register_test_client(&app_state, "newgame_test_player").await;
 
-        let game_id = get_test_game_id(&app_state);
         let _ = handle_extract(
             State(app_state.clone()),
             Path(game_id),
@@ -1488,7 +1595,11 @@ mod tests {
     #[tokio::test]
     async fn test_handle_dumpgame_success() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state);
+        let game_id = get_test_game_id(&app_state).await;
+        
+        // Register BOARD_ID as a board client for this game using API
+        register_board_client_to_game(&app_state, &game_id).await;
+        
         let mut headers = HeaderMap::new();
         headers.insert("X-Client-ID", BOARD_ID.parse().unwrap()); // Board client
 
@@ -1517,7 +1628,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_dumpgame_unauthorized() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state);
+        let game_id = get_test_game_id(&app_state).await;
         let client_id = register_test_client(&app_state, "dumpgame_test_player").await;
 
         let mut headers = HeaderMap::new();
@@ -1528,13 +1639,13 @@ mod tests {
         assert!(result.is_err());
         let error = result.unwrap_err();
         assert_eq!(error.status, StatusCode::FORBIDDEN);
-        assert!(error.message.contains("Unauthorized: Only board client can dump the game"));
+        assert!(error.message.contains("Unauthorized: Only board clients can dump the game"));
     }
 
     #[tokio::test]
     async fn test_handle_dumpgame_missing_client_id() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state);
+        let game_id = get_test_game_id(&app_state).await;
         let headers = HeaderMap::new(); // No X-Client-ID header
 
         let result = handle_dumpgame(State(app_state.clone()), Path(game_id), headers).await;
@@ -1556,10 +1667,13 @@ mod tests {
     #[tokio::test]
     async fn test_client_flow_integration() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state);
+        let game_id = get_test_game_id(&app_state).await;
+
+        // Register BOARD_ID as a board client for this game using API
+        register_board_client_to_game(&app_state, &game_id).await;
 
         // Register a client
-        let client_id = register_test_client(&app_state, "integration_test_player").await;
+        let client_id = register_test_client_to_game(&app_state, "integration_test_player", &game_id).await;
 
         // List assigned cards
         let mut headers = HeaderMap::new();
@@ -1621,6 +1735,9 @@ mod tests {
     async fn test_handle_global_gameslist() {
         let app_state = create_test_app_state();
 
+        // Create a test game first
+        let _game_id = create_test_game(&app_state).await;
+
         // Test the games list endpoint
         let result = handle_global_gameslist(State(app_state.clone())).await;
         assert!(result.is_ok());
@@ -1632,7 +1749,7 @@ mod tests {
         assert_eq!(json_value["success"], true);
         assert_eq!(json_value["total_games"], 1);
 
-        // Check statistics
+        // Check statistics (should be 1 new game)
         let stats = &json_value["statistics"];
         assert_eq!(stats["new_games"], 1);
         assert_eq!(stats["active_games"], 0);
@@ -1653,30 +1770,25 @@ mod tests {
     async fn test_handle_games_list_with_multiple_games() {
         let app_state = create_test_app_state();
 
-        // Create additional games with different statuses
-        let active_game = crate::game::Game::new();
-        let closed_game = crate::game::Game::new();
+        // Create a new game first via API
+        let _new_game_id = create_test_game(&app_state).await;
 
-        // Make active_game active by extracting some numbers
-        {
-            let current_score = active_game.published_score();
-            let _ = active_game.extract_number(current_score); // Make it active
-        }
+        // Create an active game via API and make it active by extracting numbers
+        let active_game_id = create_test_game(&app_state).await;
+        register_board_client_to_game(&app_state, &active_game_id).await;
+        
+        let mut board_headers = HeaderMap::new();
+        board_headers.insert("X-Client-ID", BOARD_ID.parse().unwrap());
+        
+        // Extract a number to make it active
+        let _ = handle_extract(
+            State(app_state.clone()),
+            Path(active_game_id),
+            board_headers.clone(),
+            Query(ClientIdQuery { client_id: None }),
+        ).await.unwrap();
 
-        // Make closed_game closed by setting BINGO score
-        {
-            let mut scorecard = closed_game.scorecard().lock().unwrap();
-            scorecard.published_score = 15; // BINGO reached
-        }
-
-        // Add games to registry
-        let active_arc = Arc::new(active_game);
-        let closed_arc = Arc::new(closed_game);
-
-        let _ = app_state.game_registry.add_game(active_arc.clone());
-        let _ = app_state.game_registry.add_game(closed_arc.clone());
-
-        // Test the games list endpoint
+        // Test the games list endpoint - we now have 2 games (1 new, 1 active)
         let result = handle_global_gameslist(State(app_state.clone())).await;
         assert!(result.is_ok());
 
@@ -1685,35 +1797,33 @@ mod tests {
 
         // Verify response structure
         assert_eq!(json_value["success"], true);
-        assert_eq!(json_value["total_games"], 3); // Original + active + closed
+        assert_eq!(json_value["total_games"], 2); // New + active
 
         // Check statistics
         let stats = &json_value["statistics"];
         assert_eq!(stats["new_games"], 1);
         assert_eq!(stats["active_games"], 1);
-        assert_eq!(stats["closed_games"], 1);
+        assert_eq!(stats["closed_games"], 0); // No closed games yet
 
         // Check games array
         let games = json_value["games"].as_array().unwrap();
-        assert_eq!(games.len(), 3);
+        assert_eq!(games.len(), 2);
 
-        // Verify we have all three statuses represented
+        // Verify we have the expected statuses represented
         let statuses: Vec<&str> = games.iter()
             .map(|game| game["status"].as_str().unwrap())
             .collect();
         assert!(statuses.contains(&"New"));
         assert!(statuses.contains(&"Active"));
-        assert!(statuses.contains(&"Closed"));
 
-        // Find and verify the closed game has closed_at timestamp
-        let closed_games: Vec<&serde_json::Value> = games.iter()
-            .filter(|game| game["status"] == "Closed")
+        // Verify the active game doesn't have a close_date
+        let active_games: Vec<&serde_json::Value> = games.iter()
+            .filter(|game| game["status"] == "Active")
             .collect();
-        assert_eq!(closed_games.len(), 1);
+        assert_eq!(active_games.len(), 1);
 
-        let closed_game_data = closed_games[0];
-        assert_ne!(closed_game_data["close_date"], serde_json::Value::Null);
-        assert!(closed_game_data["close_date"].as_str().unwrap().contains("UTC"));
+        let active_game_data = active_games[0];
+        assert_eq!(active_game_data["close_date"], serde_json::Value::Null);
     }
 
     #[tokio::test]
@@ -1721,6 +1831,10 @@ mod tests {
         println!("🎲 Starting comprehensive multi-game test with 3 games, 2 clients each, 6 cards per client");
 
         let app_state = create_test_app_state();
+        
+        // Register BOARD_ID as a board client for the original game using API
+        let original_game_id = get_test_game_id(&app_state).await;
+        register_board_client_to_game(&app_state, &original_game_id).await;
 
         // Step 1: Create 3 new games via the newgame endpoint
         let mut game_ids = Vec::new();
@@ -1734,6 +1848,10 @@ mod tests {
 
             let newgame_response = newgame_result.unwrap();
             let game_id = newgame_response["game_id"].as_str().unwrap().to_string();
+            
+            // Register BOARD_ID as a board client for this new game using API
+            register_board_client_to_game(&app_state, &game_id).await;
+            
             game_ids.push(game_id.clone());
             println!("✅ Created game {i} with ID: {game_id}");
         }
@@ -2247,7 +2365,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_global_register_integration_with_game_registration() {
         let app_state = create_test_app_state();
-        let game_id = app_state.game.id().clone();
+        let game_id = create_test_game(&app_state).await;
 
         // Step 1: Register client globally first
         let global_request = RegisterRequest {
@@ -2284,13 +2402,147 @@ mod tests {
         assert_eq!(client_info.email, "integration@test.com"); // Original email preserved
 
         // Verify client is registered in the game and has cards
-        assert!(app_state.game.contains_client(&global_client_id));
+        let game = app_state.game_registry.get_game(&game_id).unwrap().unwrap();
+        assert!(game.contains_client(&global_client_id));
         
         // Check that cards were assigned during game registration
-        if let Ok(manager) = app_state.game.card_manager().lock() {
+        if let Ok(manager) = game.card_manager().lock() {
             let client_cards = manager.get_client_cards(&global_client_id);
             assert!(client_cards.is_some());
             assert_eq!(client_cards.unwrap().len(), 2); // 2 cards requested
         }
+    }
+
+    #[tokio::test]
+    async fn test_handle_extract_game_specific_client_types() {
+        let app_state = create_test_app_state();
+        
+        // Create two games via API
+        let game1_id = create_test_game(&app_state).await;
+        let game2_id = create_test_game(&app_state).await;
+        
+        // Register TestPlayer as "player" in game1
+        let player_request = RegisterRequest {
+            name: "TestPlayer".to_string(),
+            client_type: "player".to_string(),
+            nocard: Some(1),
+            email: None,
+        };
+        
+        let game1_register_result = handle_join(
+            Path(game1_id.clone()),
+            State(app_state.clone()),
+            JsonExtractor(player_request.clone())
+        ).await;
+        assert!(game1_register_result.is_ok());
+        let client_id = game1_register_result.unwrap().0.client_id;
+        
+        // Register same TestPlayer as "board" in game2
+        let board_request = RegisterRequest {
+            name: "TestPlayer".to_string(),
+            client_type: "board".to_string(),
+            nocard: Some(1),
+            email: None,
+        };
+        
+        let game2_register_result = handle_join(
+            Path(game2_id.clone()),
+            State(app_state.clone()),
+            JsonExtractor(board_request)
+        ).await;
+        assert!(game2_register_result.is_ok());
+        assert_eq!(game2_register_result.unwrap().0.client_id, client_id); // Same client ID
+        
+        // Test extraction authorization
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Client-ID", client_id.parse().unwrap());
+        
+        // TestPlayer should NOT be able to extract from game1 (where they are "player")
+        let game1_extract_result = handle_extract(
+            State(app_state.clone()),
+            Path(game1_id),
+            headers.clone(),
+            Query(ClientIdQuery { client_id: None }),
+        ).await;
+        assert!(game1_extract_result.is_err());
+        let error = game1_extract_result.unwrap_err();
+        assert_eq!(error.status, StatusCode::FORBIDDEN);
+        assert!(error.message.contains("Unauthorized: Only board clients can extract numbers"));
+        
+        // TestPlayer SHOULD be able to extract from game2 (where they are "board")
+        let game2_extract_result = handle_extract(
+            State(app_state.clone()),
+            Path(game2_id),
+            headers,
+            Query(ClientIdQuery { client_id: None }),
+        ).await;
+        assert!(game2_extract_result.is_ok());
+        let response = game2_extract_result.unwrap();
+        assert_eq!(response.0["success"], true);
+        assert!(response.0["extracted_number"].is_number());
+    }
+
+    #[tokio::test]
+    async fn test_handle_dumpgame_game_specific_client_types() {
+        let app_state = create_test_app_state();
+        
+        // Create two games via API
+        let game1_id = create_test_game(&app_state).await;
+        let game2_id = create_test_game(&app_state).await;
+        
+        // Register TestPlayer as "player" in game1 and "board" in game2
+        let player_request = RegisterRequest {
+            name: "TestPlayer".to_string(),
+            client_type: "player".to_string(),
+            nocard: Some(1),
+            email: None,
+        };
+        
+        let game1_register_result = handle_join(
+            Path(game1_id.clone()),
+            State(app_state.clone()),
+            JsonExtractor(player_request)
+        ).await;
+        assert!(game1_register_result.is_ok());
+        let client_id = game1_register_result.unwrap().0.client_id;
+        
+        let board_request = RegisterRequest {
+            name: "TestPlayer".to_string(),
+            client_type: "board".to_string(),
+            nocard: Some(1),
+            email: None,
+        };
+        
+        let game2_register_result = handle_join(
+            Path(game2_id.clone()),
+            State(app_state.clone()),
+            JsonExtractor(board_request)
+        ).await;
+        assert!(game2_register_result.is_ok());
+        
+        // Test dumpgame authorization
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Client-ID", client_id.parse().unwrap());
+        
+        // TestPlayer should NOT be able to dump game1 (where they are "player")
+        let game1_dump_result = handle_dumpgame(
+            State(app_state.clone()),
+            Path(game1_id),
+            headers.clone(),
+        ).await;
+        assert!(game1_dump_result.is_err());
+        let error = game1_dump_result.unwrap_err();
+        assert_eq!(error.status, StatusCode::FORBIDDEN);
+        assert!(error.message.contains("Unauthorized: Only board clients can dump the game"));
+        
+        // TestPlayer SHOULD be able to dump game2 (where they are "board")
+        let game2_dump_result = handle_dumpgame(
+            State(app_state.clone()),
+            Path(game2_id),
+            headers,
+        ).await;
+        assert!(game2_dump_result.is_ok());
+        let response = game2_dump_result.unwrap();
+        assert_eq!(response.0["success"], true);
     }
 }

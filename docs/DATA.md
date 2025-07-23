@@ -28,10 +28,16 @@ graph LR
     Game --> Pouch["Pouch (Arc&lt;Mutex&lt;Pouch&gt;)"]
     Game --> ScoreCard["ScoreCard (Arc&lt;Mutex&lt;ScoreCard&gt;)"]
     Game --> CardMgr["CardAssignmentManager (Arc&lt;Mutex&gt;)"]
+    Game --> GCTR["GameClientTypeRegistry (struct)"]
     
     Game -.-> GCR
     Game -.-> ClientRef["get_client_info()"]
     Game -.-> ClientInfos["get_registered_client_infos()"]
+    
+    GCTR --> ClientTypes["client_types (Arc&lt;Mutex&lt;HashMap&gt;&gt;)"]
+    ClientTypes --> GameClientType["GameClientType (struct)"]
+    GameClientType --> GCTClientID["client_id (String) → ClientInfo.id"]
+    GameClientType --> GCTType["client_type (String)"]
     
     RC --> ClientIDs["Client IDs (String)"]
     
@@ -61,9 +67,9 @@ graph LR
     classDef collection fill:#fff3e0
     classDef method fill:#f1f8e9
     
-    class AppState,Game,GameEntry,ClientInfo,Board,Pouch,ScoreCard,CardAssignmentManager,CardAssignment,ClientRegistry,GameRegistry struct
-    class ClientsArc,GameMap,CardMgr wrapper
-    class Name,ID,Type,TS,Email,GameID,CreatedAt,Numbers,MarkedNums,PouchNums,Score,CardID,ClientID,SCClientID,SCCardID,SCNumbers field
+    class AppState,Game,GameEntry,ClientInfo,Board,Pouch,ScoreCard,CardAssignmentManager,CardAssignment,ClientRegistry,GameRegistry,GameClientTypeRegistry,GameClientType struct
+    class ClientsArc,GameMap,CardMgr,ClientTypes wrapper
+    class Name,ID,Type,TS,Email,GameID,CreatedAt,Numbers,MarkedNums,PouchNums,Score,CardID,ClientID,SCClientID,SCCardID,SCNumbers,GCTClientID,GCTType field
     class RC,ClientIDs,Assignments,ClientCards,ScoreMap collection
     class ClientRef,ClientInfos,ScoreAchievement method
 ```
@@ -88,24 +94,31 @@ graph LR
 
 4. **Game (struct)** instances maintain their own isolated state:
    - **registered_clients**: Arc<Mutex<HashSet<String>>> tracking registered client IDs
+   - **client_type_registry**: GameClientTypeRegistry managing game-specific client types
    - **Board**: Arc<Mutex<Board>> containing extracted numbers and marked numbers
    - **Pouch**: Arc<Mutex<Pouch>> containing available numbers for extraction
    - **ScoreCard**: Arc<Mutex<ScoreCard>> tracking game scoring and achievements
    - **CardAssignmentManager**: Arc<Mutex<CardAssignmentManager>> managing card assignments
 
-5. **Game-ClientRegistry Integration**: Game provides methods to properly reference global ClientRegistry:
+5. **GameClientTypeRegistry** manages game-specific client type associations:
+   - **client_types**: Arc<Mutex<HashMap<String, String>>> mapping client IDs to their types within this game
+   - Contains **GameClientType (struct)** objects linking client IDs to their game-specific types
+   - Enables clients to have different roles across different games (e.g., "player" in one game, "board" in another)
+   - Provides methods like `set_client_type()`, `is_client_type()`, `get_clients_by_type()`
+
+6. **Game-ClientRegistry Integration**: Game provides methods to properly reference global ClientRegistry:
    - `get_registered_client_infos()`: Returns full ClientInfo for all clients registered in this game
    - `get_client_info(client_id, registry)`: Returns ClientInfo for a specific client if registered
    - `registered_client_count()`: Returns count of registered clients
    - `get_registered_client_ids()`: Returns list of registered client IDs
    - This ensures Game references ClientInfo from the global registry rather than maintaining separate entities
 
-6. **CardAssignmentManager** handles card operations:
+7. **CardAssignmentManager** handles card operations:
    - **assignments**: HashMap<String, CardAssignment> mapping card IDs to assignments
    - **client_cards**: HashMap<String, Vec<String>> mapping client IDs to their cards
    - Provides card generation, assignment, and ownership tracking
 
-7. **Improved Architecture Benefits**:
+8. **Improved Architecture Benefits**:
    - **Encapsulation**: Thread safety is hidden as implementation detail in both registries
    - **Cleaner API**: `client_registry.get_by_name()` vs `app_state.global_client_registry.lock().unwrap().get()`
    - **Error Handling**: Methods return `Result<T, String>` for consistent error management
@@ -113,7 +126,8 @@ graph LR
    - **Maintainability**: Callers don't need to handle mutex locking complexities
    - **Single Source of Truth**: Game references ClientInfo from global registry instead of maintaining separate entities
    - **Data Integrity**: No risk of Game's client info becoming out of sync with global registry
-   - **Referential Integrity**: ScoreAchievement.client_id references ClientInfo.id, ScoreAchievement.card_id references CardAssignment.card_id, CardAssignment.client_id references ClientInfo.id
+   - **Referential Integrity**: ScoreAchievement.client_id references ClientInfo.id, ScoreAchievement.card_id references CardAssignment.card_id, CardAssignment.client_id references ClientInfo.id, GameClientType.client_id references ClientInfo.id
+   - **Game-Specific Authorization**: GameClientTypeRegistry enables flexible client authorization per game without affecting global client identity
 
 This architecture ensures clean separation between global client management, game registry management, and individual game state isolation with proper thread safety and encapsulation.
 
@@ -140,6 +154,13 @@ The game dump functionality serializes the complete game state to JSON files in 
     }
   },
   "registered_clients": ["89C5D03DB5F88410", "C6B6DF1363C4360E"],
+  "client_type_registry": {
+    "client_types": {
+      "89C5D03DB5F88410": "player",
+      "C6B6DF1363C4360E": "player",
+      "0000000000000000": "board"
+    }
+  },
   "card_manager": {
     "assignments": {
       "card_id": { "card_id": "...", "client_id": "...", "card_data": [[...]] }
@@ -155,8 +176,10 @@ The game dump functionality serializes the complete game state to JSON files in 
 ### Key JSON Structure Notes:
 
 1. **Client References**: The JSON dumps only contain client IDs, not full ClientInfo objects (supporting our architecture decision)
-2. **ScoreCard Complexity**: The score_map contains detailed scoring entries grouped by score value
-3. **Timestamp Format**: SystemTime is serialized as seconds and nanoseconds since epoch
-4. **Card Data**: Full card assignments and client-card mappings are preserved
-5. **Game Lifecycle**: Both game creation and end timestamps are recorded
-6. **Email Privacy**: ClientInfo email field is stored internally but excluded from JSON dumps and API responses
+2. **Game-Specific Client Types**: The client_type_registry section shows client types within this specific game context
+3. **ScoreCard Complexity**: The score_map contains detailed scoring entries grouped by score value
+4. **Timestamp Format**: SystemTime is serialized as seconds and nanoseconds since epoch
+5. **Card Data**: Full card assignments and client-card mappings are preserved
+6. **Game Lifecycle**: Both game creation and end timestamps are recorded
+7. **Email Privacy**: ClientInfo email field is stored internally but excluded from JSON dumps and API responses
+8. **Game Isolation**: Each JSON dump contains only data for that specific game, including game-specific client types

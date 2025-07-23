@@ -7,7 +7,7 @@ The Tombola project includes multiple client applications built using a modular 
 This project consists of three main binaries:
 
 - **`tombola-server`**: Main game server with terminal UI and HTTP API
-- **`tombola-client`**: Terminal client that displays current game state
+- **`tombola-client`**: Board client that requires registration and displays current game state  
 - **`tombola-player`**: Interactive client for card management and gameplay
 
 ## Client Library Modules
@@ -79,12 +79,18 @@ cargo run --bin tombola-player -- --exit
 
 The `tombola-client` supports the following command-line options:
 
+- `--name <NAME>` / `-n <NAME>`: Board client name (default from config)
 - `--newgame`: Create a new game before starting the client interface
 - `--gameid <GAME_ID>`: Specify the game ID to connect to
 - `--exit`: Exit after displaying the current state (no interactive loop)
 - `--listgames`: List available games and exit
 - `--help`: Display help information
 - `--version`: Display version information
+
+**Client Registration:**
+- Board clients must register with client_type "board" before extracting numbers
+- Registration happens automatically on startup with the specified or default name
+- Only registered board clients can extract numbers from the game
 
 **Default Behavior (No Game ID Specified):**
 - Automatically calls `/gameslist` endpoint to display available games
@@ -95,6 +101,9 @@ The `tombola-client` supports the following command-line options:
 ```bash
 # Start board client normally (shows games list and instructions)
 cargo run --bin tombola-client
+
+# Start board client with custom name
+cargo run --bin tombola-client -- --name "MainBoard" --gameid game_12345678
 
 # Start board client with new game creation
 cargo run --bin tombola-client -- --newgame
@@ -116,7 +125,7 @@ cargo run --bin tombola-client -- --help
 ```
 
 **Notes about --newgame option:**
-- Only the board client can create new games (uses client ID "0000000000000000")
+- Only registered board clients can create new games (must be registered with client_type "board")
 - Creates a completely new game in the GameRegistry with a unique game ID
 - The original game continues to exist and can be accessed separately
 - New game is registered in the multi-game registry for independent access
@@ -284,7 +293,7 @@ cargo run --bin tombola-player -- --help
 
 ### Game-Specific Features
 - **Game-Specific API Routing**: All API endpoints use `/{game_id}/` routing for game isolation
-- **Client Registration Per Game**: Clients register to specific games using `/{game_id}/register`
+- **Client Registration Per Game**: Clients register to specific games using `/{game_id}/join`
 - **Independent Game States**: Each game maintains separate Board, Pouch, ScoreCard, and Client registries
 - **Game Management**: Create new games via `/newgame` endpoint and list all games via `/gameslist`
 - **Cross-Game Client Support**: Clients can participate in multiple games simultaneously

@@ -10,7 +10,7 @@ use tower_http::cors::CorsLayer;
 
 use crate::config::ServerConfig;
 use crate::logging::{log_info, log_error, log_error_stderr};
-use crate::game::{Game, GameRegistry};
+use crate::game::GameRegistry;
 use crate::client::ClientRegistry;
 use crate::api_handlers::*;
 
@@ -22,7 +22,6 @@ struct ErrorResponse {
 }
 
 pub struct AppState {
-    pub game: Game,
     pub game_registry: GameRegistry,
     pub global_client_registry: ClientRegistry,
     pub config: ServerConfig,
@@ -32,22 +31,12 @@ pub fn start_server(config: ServerConfig) -> (tokio::task::JoinHandle<()>, Arc<A
     let shutdown_signal = Arc::new(AtomicBool::new(false));
     let _shutdown_clone = Arc::clone(&shutdown_signal);
 
-    // Create the unified Game state container
-    let game = Game::new();
-    log_info(&format!("Created new game instance: {}", game.game_info()));
-
-    // Create the GameRegistry and register the initial game
+    // Create the GameRegistry (no initial game)
     let game_registry = GameRegistry::new();
-    let game_arc = Arc::new(game.clone());
-    if let Err(e) = game_registry.add_game(game_arc) {
-        log_error(&format!("Failed to register initial game: {e}"));
-    } else {
-        log_info(&format!("Registered initial game in registry: {}", game.id()));
-    }
+    log_info("GameRegistry created - no initial games");
 
     let handle = tokio::spawn(async move {
         let app_state = Arc::new(AppState {
-            game,
             game_registry,
             global_client_registry: ClientRegistry::new(),
             config: config.clone(),

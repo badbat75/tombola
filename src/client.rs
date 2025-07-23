@@ -4,21 +4,6 @@ use std::hash::Hasher;
 use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
-// Board client ID constant used throughout the application for client operations
-pub const BOARDCLIENT_ID: &str = "0000000000000000";
-
-/// Returns the board client's client ID as a String
-#[inline]
-pub fn boardclient_id() -> String {
-    BOARDCLIENT_ID.to_string()
-}
-
-/// Returns the board client ID as a String (generic helper for any string conversion)
-#[inline]
-pub fn boardclient_id_string() -> String {
-    BOARDCLIENT_ID.to_string()
-}
-
 // Client registration structures
 #[derive(Debug, Deserialize, Clone)]
 pub struct RegisterRequest {
@@ -168,7 +153,7 @@ impl ClientRegistry {
 
     /// Helper function to get client name by client ID
     pub fn get_client_name_by_id(&self, client_id: &str) -> Result<Option<String>, String> {
-        if client_id == BOARDCLIENT_ID {
+        if client_id == crate::board::BOARD_ID {
             return Ok(Some("Board".to_string()));
         }
 
@@ -277,7 +262,7 @@ mod tests {
         assert_eq!(name, Some("testplayer".to_string()));
 
         // Test board client special case
-        let board_name = registry.get_client_name_by_id(BOARDCLIENT_ID).unwrap();
+        let board_name = registry.get_client_name_by_id(crate::board::BOARD_ID).unwrap();
         assert_eq!(board_name, Some("Board".to_string()));
     }
 

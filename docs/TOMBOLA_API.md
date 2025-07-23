@@ -48,18 +48,24 @@ http://127.0.0.1:3000
 
 **Authentication Notes:**
 - **None**: No authentication required
-- **Client ID**: Requires `X-Client-ID` header with registered client ID
-- **Board Client**: Requires `X-Client-ID: 0000000000000000` (16 zeros)
+- **Client ID**: Requires valid client ID in `X-Client-ID` header (client must be registered to the game)
+- **Board Client**: Requires client ID in `X-Client-ID` header AND client must have client_type "board"
 
 ## Authentication
 
-Client authentication is required for most game-specific endpoints via the `X-Client-ID` header. Clients must register to specific games first to obtain access.
+Client authentication is required for most game-specific endpoints via the `X-Client-ID` header. All clients (including board clients) must register to specific games first to obtain access.
 
-### Special Client IDs
-- **Board Client**: Uses special client ID `"0000000000000000"` (16 zeros)
-  - Can extract numbers, create games, and dump game state
-  - No registration required for any game
-- **Player Clients**: Must register separately to each game they want to join
+### Client Types and Registration
+- **Board Clients**: Must register with `client_type: "board"` to extract numbers and manage games
+  - Receive special BOARD_ID card (`0000000000000000`) during registration
+  - Only board clients can extract numbers and create new games
+- **Player Clients**: Register with `client_type: "player"` for card management and gameplay
+  - Must register separately to each game they want to join
+  - Receive regular numbered cards during registration
+
+### Authorization Levels
+- **Game Registration Required**: Client must be registered to the specific game via `/{game_id}/join`
+- **Board Client Only**: Endpoint restricted to clients with `client_type: "board"`
 
 ## Common Headers
 
@@ -102,7 +108,7 @@ Common HTTP status codes:
 
 Create a new game instance in the GameRegistry. This endpoint does not destroy existing games but creates a new isolated game.
 
-**Authentication Required:** Board Client ID (`"0000000000000000"`)
+**Authentication Required:** Board Client (registered client with client_type "board")
 
 **Success Response (200 OK):**
 ```json
@@ -213,10 +219,19 @@ Join a client to a specific game (registers if needed).
 ```json
 {
   "name": "client_name",
-  "client_type": "player|board|admin",
-  "nocard": 6  // Optional: number of cards to generate during registration (default: 1)
+  "client_type": "player|board",
+  "nocard": 6,  // Optional: number of cards to generate during registration (default: 1)
+  "email": "optional@email.com"  // Optional: email address for the client
 }
 ```
+
+**Client Type Details:**
+- `"player"`: Standard player client, receives regular numbered cards
+- `"board"`: Board client, receives special BOARD_ID card, can extract numbers
+
+**Card Assignment:**
+- **Player clients**: Receive regular cards with unique IDs containing random numbers
+- **Board clients**: Receive exactly one card with ID `"0000000000000000"` representing the entire game board
 
 **Success Response (200 OK):**
 ```json
@@ -552,14 +567,14 @@ Extract the next number from the pouch for a specific game (remote extraction co
 **Path Parameters:**
 - `game_id`: ID of the game (e.g., `game_12345678`)
 
-**Authentication Required:** Yes (X-Client-ID header must be "0000000000000000")
+**Authentication Required:** Yes (X-Client-ID header required)
 
-**Authorization:** Only the board client with ID "0000000000000000" can extract numbers.
+**Authorization:** Only registered board clients (client_type "board") can extract numbers.
 
 **Request:**
 ```bash
 curl -X POST http://127.0.0.1:3000/game_12345678/extract
-  -H "X-Client-ID: 0000000000000000"
+  -H "X-Client-ID: <board_client_id>"
   -H "Content-Type: application/json"
 ```
 
@@ -604,7 +619,7 @@ curl -X POST http://127.0.0.1:3000/game_12345678/extract
 
 **Notes:**
 - Performs extraction logic for the specific game only
-- **Security**: Only the special board client (ID: "0000000000000000") is authorized to extract numbers
+- **Security**: Only registered board clients (client_type "board") are authorized to extract numbers
 - Regular game clients cannot trigger extractions for security and game integrity
 - Automatically updates the board state, scorecard, and marked numbers for the specific game
 - Follows the coordinated mutex locking pattern to ensure thread safety per game
@@ -624,14 +639,14 @@ curl -X POST http://127.0.0.1:3000/game_12345678/extract
 - Generates a new unique game ID
 - Creates a fresh game timestamp
 
-**Authentication Required:** Yes (X-Client-ID header must be "0000000000000000")
+**Authentication Required:** Yes (X-Client-ID header required)
 
-**Authorization:** Only the board client with ID "0000000000000000" can reset the game.
+**Authorization:** Only registered board clients (client_type "board") can reset the game.
 
 **Request:**
 ```bash
 curl -X POST http://127.0.0.1:3000/newgame \
-  -H "X-Client-ID: 0000000000000000" \
+  -H "X-Client-ID: <board_client_id>" \
   -H "Content-Type: application/json"
 ```
 
@@ -662,7 +677,7 @@ curl -X POST http://127.0.0.1:3000/newgame \
 **Notes:**
 - Resets all shared game state to initial conditions and generates a new unique game ID
 - **Game Instance Tracking**: Each new game gets a unique 8-digit hexadecimal ID and fresh timestamp
-- **Security**: Only the special board client (ID: "0000000000000000") is authorized to reset the game
+- **Security**: Only registered board clients (client_type "board") are authorized to reset the game
 - Clears the Board (extracted numbers and marked positions)
 - Refills the Pouch with all numbers from 1-90
 - Resets the ScoreCard to initial state (published_score: 0, empty score_map)
@@ -707,7 +722,7 @@ curl http://127.0.0.1:3000/gameslist
 2. **Create a new game (board client only):**
 ```bash
 curl -X POST http://127.0.0.1:3000/newgame \
-  -H "X-Client-ID: 0000000000000000" \
+  -H "X-Client-ID: <board_client_id>" \
   -H "Content-Type: application/json"
 ```
 
@@ -773,13 +788,13 @@ curl http://127.0.0.1:3000/game_12345678/scoremap
 11. **Extract numbers in specific game (board client only):**
 ```bash
 curl -X POST http://127.0.0.1:3000/game_12345678/extract \
-  -H "X-Client-ID: 0000000000000000"
+  -H "X-Client-ID: <board_client_id>"
 ```
 
 12. **Dump specific game state:**
 ```bash
 curl -X POST http://127.0.0.1:3000/game_12345678/dumpgame \
-  -H "X-Client-ID: 0000000000000000"
+  -H "X-Client-ID: <board_client_id>"
 ```
 
 ## Rate Limiting

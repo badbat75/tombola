@@ -7,7 +7,7 @@ A Rust-based multi-binary tombola (bingo) game with a client-server architecture
 This project consists of three main binaries with a modular client library architecture:
 
 - **`tombola-server`**: Main game server with terminal UI and HTTP API
-- **`tombola-client`**: Terminal client that displays current game state
+- **`tombola-client`**: Board client that requires registration and displays current game state
 - **`tombola-player`**: Interactive client for card management and gameplay
 
 ### Client Module Architecture
@@ -29,7 +29,8 @@ This modular design eliminates code duplication between clients while maintainin
 
 The server now supports multiple concurrent games through a **GameRegistry** system:
 - **Game-Specific API Routing**: All API endpoints use `/{game_id}/` routing for game isolation
-- **Client Registration Per Game**: Clients register to specific games using `/{game_id}/register`
+- **Client Registration Per Game**: All clients (including board clients) register to specific games using `/{game_id}/join`
+- **Board Client Authorization**: Only registered board clients (client_type: "board") can extract numbers
 - **Independent Game States**: Each game maintains separate Board, Pouch, ScoreCard, and Client registries
 - **Game Management**: Create new games via `/newgame` endpoint and list all games via `/gameslist`
 
@@ -51,7 +52,9 @@ The server now supports multiple concurrent games through a **GameRegistry** sys
 
 - **Client Components:**
   - **Modular Client Library**: Centralized shared functionality in `src/clients/` library
-  - Terminal-based board display client with CLI options
+  - **Board Client Registration**: Board clients must register with client_type "board" to extract numbers
+  - **Client Name Specification**: Both board and player clients support custom names via --name CLI option
+  - Terminal-based board display client with CLI options and registration requirement
   - Interactive card management client with multi-game support
   - HTTP API integration with authentication via `X-Client-ID` headers
   - Smart game discovery and automatic game listing
@@ -95,7 +98,8 @@ The server provides a RESTful HTTP API on `http://127.0.0.1:3000` with **game-sp
 
 ### Multi-Game API Features:
 - **Game-Specific Endpoints**: All game operations use `/{game_id}/` routing for isolation
-- **Client Registration**: `POST /{game_id}/register` - Register clients to specific games
+- **Client Registration**: `POST /{game_id}/join` - Register clients to specific games with client types
+- **Board Client Authorization**: Only clients with client_type "board" can extract numbers
 - **Game Management**: `POST /newgame` - Create new games, `GET /gameslist` - List all games
 - **Game Operations**: Extract numbers, manage cards, check status - all game-specific
 - **Cross-Game Compatibility**: Clients can participate in multiple games simultaneously

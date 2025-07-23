@@ -22,7 +22,7 @@
 use tombola::clients::terminal;
 
 // Use shared modules from library
-use tombola::clients::{game_utils, api_client};
+use tombola::clients::{game_utils, api_client, registration};
 
 use std::error::Error;
 use clap::Parser;
@@ -36,6 +36,10 @@ use tombola::config::ClientConfig;
 #[command(about = "Tombola Board Client - Display game state and perform extractions")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
 struct Args {
+    /// Board client name (default from config)
+    #[arg(short, long)]
+    name: Option<String>,
+
     /// Create a new game before starting the client
     #[arg(long)]
     newgame: bool,
@@ -88,6 +92,7 @@ pub async fn run_client() -> Result<(), Box<dyn Error>> {
     // Load client configuration to get server URL and try to get current game
     let config = ClientConfig::load_or_default();
     let server_base_url = config.server_url();
+    let default_client_name = config.client_name.clone();
 
     // Try to show games list first, then fall back to get current running game
     match game_utils::list_games(&server_base_url).await {
@@ -112,7 +117,7 @@ pub async fn run_client() -> Result<(), Box<dyn Error>> {
                 }
             };
 
-            run_client_with_game_id(&server_base_url, &game_id).await
+            run_client_with_game_id(&server_base_url, &game_id, &default_client_name).await
         }
     }
 }
@@ -121,6 +126,7 @@ pub async fn run_client_once() -> Result<(), Box<dyn Error>> {
     // This is kept for backward compatibility but will show games list if no game detected
     let config = ClientConfig::load_or_default();
     let server_base_url = config.server_url();
+    let default_client_name = config.client_name.clone();
 
     // Try to show games list first, then fall back to get current running game
     match game_utils::list_games(&server_base_url).await {
@@ -145,20 +151,40 @@ pub async fn run_client_once() -> Result<(), Box<dyn Error>> {
                 }
             };
 
-            run_client_once_with_game_id(&server_base_url, &game_id).await
+            run_client_once_with_game_id(&server_base_url, &game_id, &default_client_name).await
         }
     }
 }
 
-pub async fn run_client_with_game_id(server_base_url: &str, game_id: &str) -> Result<(), Box<dyn Error>> {
-    run_client_with_exit_flag_and_game_id(server_base_url, game_id, false).await
+pub async fn run_client_with_game_id(server_base_url: &str, game_id: &str, client_name: &str) -> Result<(), Box<dyn Error>> {
+    run_client_with_exit_flag_and_game_id(server_base_url, game_id, false, client_name).await
 }
 
-pub async fn run_client_once_with_game_id(server_base_url: &str, game_id: &str) -> Result<(), Box<dyn Error>> {
-    run_client_with_exit_flag_and_game_id(server_base_url, game_id, true).await
+pub async fn run_client_once_with_game_id(server_base_url: &str, game_id: &str, client_name: &str) -> Result<(), Box<dyn Error>> {
+    run_client_with_exit_flag_and_game_id(server_base_url, game_id, true, client_name).await
 }
 
-pub async fn run_client_with_exit_flag_and_game_id(server_base_url: &str, game_id: &str, exit_after_display: bool) -> Result<(), Box<dyn Error>> {
+pub async fn run_client_with_exit_flag_and_game_id(server_base_url: &str, game_id: &str, exit_after_display: bool, client_name: &str) -> Result<(), Box<dyn Error>> {
+    // Register the board client first
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
+    
+    println!("🔗 Registering board client '{}' with game '{}'...", client_name, game_id);
+    
+    let register_response = registration::join_client(
+        server_base_url,
+        game_id,
+        client_name,
+        "board",
+        Some(1), // Generate 1 BOARD_ID card
+        Some("board@game.system".to_string()),
+        &http_client
+    ).await?;
+    
+    let board_client_id = register_response.client_id;
+    println!("✅ Board client registered successfully with ID: {board_client_id}");
+
     // Main game loop
     loop {
         // Retrieve and display current game state
@@ -204,8 +230,8 @@ pub async fn run_client_with_exit_flag_and_game_id(server_base_url: &str, game_i
         let should_continue = loop {
             match terminal::wait_for_user_action() {
                 terminal::KeyAction::Extract => {
-                    // Extract a number
-                    match api_client::extract_number(server_base_url, game_id, BOARD_ID).await {
+                    // Extract a number using the registered board client ID
+                    match api_client::extract_number(server_base_url, game_id, &board_client_id).await {
                         Ok(_) => {
                             break true; // Continue main loop to refresh display
                         }
@@ -450,10 +476,14 @@ async fn run_client_with_args(args: Args) -> Result<(), Box<dyn Error>> {
 
     println!("Using game ID: {game_id}");
 
-    // Run the main client functionality with game_id
+    // Determine client name from args or config
+    let client_name = args.name.unwrap_or_else(|| config.client_name.clone());
+    println!("Board client name: {client_name}");
+
+    // Run the main client functionality with game_id and client_name
     if args.exit {
-        run_client_once_with_game_id(&server_base_url, &game_id).await
+        run_client_once_with_game_id(&server_base_url, &game_id, &client_name).await
     } else {
-        run_client_with_game_id(&server_base_url, &game_id).await
+        run_client_with_game_id(&server_base_url, &game_id, &client_name).await
     }
 }
