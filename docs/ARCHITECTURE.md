@@ -55,16 +55,22 @@ The Tombola server now supports multiple concurrent games through a **GameRegist
 - **Security**: Only registered board clients (client_type "board") can trigger manual dumps
 
 ### Configuration Management (`src/config.rs`)
-- `ServerConfig`: Host/port configuration with defaults (127.0.0.1:3000)
+- `ServerConfig`: Host/port configuration with defaults (127.0.0.1:3000), enhanced logging system configuration
+- `LoggingMode`: Enum supporting Console, File, and Both logging modes
 - `ClientConfig`: Client connection settings including timeouts and retry logic
 - File-based configuration support for both server and client settings
 - Default configuration fallback when files are missing
+- Logging path configuration with automatic directory creation
 
 ### Logging System (`src/logging.rs`)
-- Centralized logging with `LogLevel` enum (Info, Error, Warning)
-- Automatic timestamp formatting using chrono
-- Consistent log message formatting across all components
-- Thread-safe logging utilities for server operations
+- **Async Logging System**: Built with tokio channels for non-blocking log processing
+- **Multiple Output Modes**: Console, File, or Both modes via `LoggingMode` enum
+- **Module-Specific Log Files**: Separate log files for different components (e.g., `api_handlers.log`, `tombola_server.log`)
+- **Centralized Configuration**: Integrated with `ServerConfig` for consistent settings
+- **Log Levels**: Debug, Info, Warning, Error with proper level-based formatting
+- **Automatic Timestamp Formatting**: Using chrono for consistent timestamp formatting
+- **Thread-Safe File Writing**: Concurrent access to multiple log files with proper mutex coordination
+- **Directory Management**: Automatic creation of log directories as needed
 
 ### Extraction Engine (`src/extraction.rs`)
 - Core extraction logic separated from UI components
@@ -126,12 +132,17 @@ Cards are generated as groups of 6 with anti-adjacency rules:
 - `src/server.rs`: Multi-game HTTP API server implementation (Axum-based)
 - `src/api_handlers.rs`: Game-specific API handler functions with routing
 - `src/pouch.rs`: Number extraction logic
-- `src/config.rs`: Configuration management for server and client settings
-- `src/logging.rs`: Centralized logging utilities
+- `src/config.rs`: Configuration management for server and client settings with enhanced logging configuration
+- `src/logging.rs`: Async logging system with module-specific file output and multiple logging modes
 - `src/extraction.rs`: Shared extraction logic for server and API
 - `src/lib.rs`: Library structure with client modules for shared functionality
 - `src/tombola_server.rs`: Main server binary with terminal UI
 - `src/server_old.rs`: Legacy Hyper-based server implementation (deprecated)
+
+### Configuration & Data Directories
+- `conf/`: Configuration files including `server.conf` with logging settings and `client.conf`
+- `data/games/`: JSON dumps of completed games (automatically created, git-ignored)
+- `logs/`: Module-specific log files when file logging is enabled (automatically created, git-ignored)
 
 ### Client Modules (`src/clients/`)
 *For detailed client module documentation, see [CLIENTS.md](CLIENTS.md).*

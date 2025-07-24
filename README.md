@@ -70,9 +70,19 @@ The game uses configurable card layouts and settings:
 - Each card contains 5×3 numbers (15 numbers per card)
 - Numbers range from 1-90 (calculated as FIRSTNUMBER to LASTNUMBER)
 - Cards follow tombola rules with proper column distribution
-- Server configuration: Host/port settings (default: 127.0.0.1:3000)
+- Server configuration: Host/port settings (default: 127.0.0.1:3000), enhanced logging system
 - Client configuration: Connection settings with timeouts and retry logic
 - File-based configuration support with fallback to defaults
+
+### Logging Configuration
+
+The server now includes an enhanced async logging system with multiple output modes:
+
+- **Console Mode**: Logs output to terminal (default)
+- **File Mode**: Logs written to module-specific files in `./logs/` directory
+- **Both Mode**: Simultaneous console and file output
+- **Module-Specific Files**: Separate log files for different components (e.g., `api_handlers.log`, `tombola_server.log`)
+- **Configurable via `conf/server.conf`**: Set `logging = console|file|both` and `logpath = ./logs`
 
 ## Build and Run
 
@@ -164,7 +174,7 @@ The server provides a RESTful HTTP API on `http://127.0.0.1:3000` with **game-sp
 
 - `rand` - Random number generation for pouch extraction and game ID generation
 - `crossterm` - Cross-platform terminal manipulation and keyboard input
-- `tokio` - Async runtime with macros, rt-multi-thread, net, and time features
+- `tokio` - Async runtime with macros, rt-multi-thread, net, and time features (also used for async logging system)
 - `reqwest` - HTTP client with JSON support (for client binaries)
 - `serde` - Serialization framework with derive features
 - `serde_json` - JSON serialization support

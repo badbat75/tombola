@@ -18,7 +18,7 @@
 
 ## Code Rules
 - Use `Context7 MCP`.
-- For print statements, use this format: `println!("Hello, {NAME}. Nice to meet you!");`.
+- For logging and print statements, use this format: `("Hello, {NAME}. Nice to meet you!")` instead of `("Hello, {}. Nice to meet you!", NAME)`.
 - Prefer references (Borrows '&') over clones or copies unless necessary.
 - Use consistent types for variables, functions, and structs.
 - Use IDE warnings to guide your code quality.

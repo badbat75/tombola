@@ -107,7 +107,7 @@ pub fn init_logging(config: &ServerConfig) {
             // Handle file output
             if matches!(logging_config.mode, LoggingMode::File | LoggingMode::Both) {
                 if let Err(e) = write_to_file(&file_writers, &logging_config, &log_msg, &formatted_message).await {
-                    eprintln!("Failed to write to log file: {}", e);
+                    eprintln!("Failed to write to log file: {e}");
                 }
             }
         }
@@ -146,10 +146,10 @@ async fn write_to_file(
 
     // Write to file
     let mut file = file_writer.lock().map_err(|_| "Failed to lock file writer")?;
-    writeln!(file, "{}", formatted_message)
-        .map_err(|e| format!("Failed to write to log file: {}", e))?;
+    writeln!(file, "{formatted_message}")
+        .map_err(|e| format!("Failed to write to log file: {e}"))?;
     file.flush()
-        .map_err(|e| format!("Failed to flush log file: {}", e))?;
+        .map_err(|e| format!("Failed to flush log file: {e}"))?;
 
     Ok(())
 }

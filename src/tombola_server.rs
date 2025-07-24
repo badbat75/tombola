@@ -14,8 +14,8 @@ async fn shutdown_signal() {
             println!("Received Ctrl+C signal, initiating graceful shutdown...");
         }
         Err(err) => {
-            log(LogLevel::Error, MODULE_NAME, &format!("Error listening for shutdown signal: {}", err));
-            eprintln!("Error listening for shutdown signal: {}", err);
+            log(LogLevel::Error, MODULE_NAME, &format!("Error listening for shutdown signal: {err}"));
+            eprintln!("Error listening for shutdown signal: {err}");
         }
     }
 }

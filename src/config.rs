@@ -3,17 +3,14 @@ use std::fs;
 use std::path::Path;
 
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub enum LoggingMode {
+    #[default]
     Console,
     File,
     Both,
 }
 
-impl Default for LoggingMode {
-    fn default() -> Self {
-        LoggingMode::Console
-    }
-}
 
 impl From<&str> for LoggingMode {
     fn from(s: &str) -> Self {
