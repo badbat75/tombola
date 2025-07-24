@@ -15,11 +15,13 @@ use serde::{Deserialize, Serialize};
 use crate::board::Board;
 use crate::pouch::Pouch;
 use crate::score::ScoreCard;
-use crate::logging::log_warning;
+use crate::logging::{log, LogLevel};
 use std::collections::HashSet;
 use crate::card::CardAssignmentManager;
 use crate::defs::Number;
 use crate::extraction::perform_extraction;
+
+const MODULE_NAME: &str = "game";
 
 /// Game-specific client type association
 /// This allows clients to have different types in different games
@@ -55,7 +57,7 @@ impl GameClientTypeRegistry {
     pub fn set_client_type(&self, client_id: &str, client_type: &str) -> Result<(), String> {
         let mut types_lock = self.client_types.lock()
             .map_err(|_| "Failed to lock client types registry")?;
-        
+
         types_lock.insert(client_id.to_string(), client_type.to_string());
         Ok(())
     }
@@ -64,7 +66,7 @@ impl GameClientTypeRegistry {
     pub fn get_client_type(&self, client_id: &str) -> Result<Option<String>, String> {
         let types_lock = self.client_types.lock()
             .map_err(|_| "Failed to lock client types registry")?;
-        
+
         Ok(types_lock.get(client_id).cloned())
     }
 
@@ -72,7 +74,7 @@ impl GameClientTypeRegistry {
     pub fn remove_client_type(&self, client_id: &str) -> Result<Option<String>, String> {
         let mut types_lock = self.client_types.lock()
             .map_err(|_| "Failed to lock client types registry")?;
-        
+
         Ok(types_lock.remove(client_id))
     }
 
@@ -80,13 +82,13 @@ impl GameClientTypeRegistry {
     pub fn get_clients_by_type(&self, client_type: &str) -> Result<Vec<String>, String> {
         let types_lock = self.client_types.lock()
             .map_err(|_| "Failed to lock client types registry")?;
-        
+
         let clients: Vec<String> = types_lock
             .iter()
             .filter(|(_, ctype)| *ctype == client_type)
             .map(|(client_id, _)| client_id.clone())
             .collect();
-        
+
         Ok(clients)
     }
 
@@ -94,7 +96,7 @@ impl GameClientTypeRegistry {
     pub fn is_client_type(&self, client_id: &str, client_type: &str) -> Result<bool, String> {
         let types_lock = self.client_types.lock()
             .map_err(|_| "Failed to lock client types registry")?;
-        
+
         Ok(types_lock.get(client_id).is_some_and(|ctype| ctype == client_type))
     }
 
@@ -102,7 +104,7 @@ impl GameClientTypeRegistry {
     pub fn get_all_client_types(&self) -> Result<Vec<GameClientType>, String> {
         let types_lock = self.client_types.lock()
             .map_err(|_| "Failed to lock client types registry")?;
-        
+
         let client_types: Vec<GameClientType> = types_lock
             .iter()
             .map(|(client_id, client_type)| GameClientType {
@@ -110,7 +112,7 @@ impl GameClientTypeRegistry {
                 client_type: client_type.clone(),
             })
             .collect();
-        
+
         Ok(client_types)
     }
 
@@ -118,7 +120,7 @@ impl GameClientTypeRegistry {
     pub fn clear(&self) -> Result<usize, String> {
         let mut types_lock = self.client_types.lock()
             .map_err(|_| "Failed to lock client types registry")?;
-        
+
         let count = types_lock.len();
         types_lock.clear();
         Ok(count)
@@ -513,14 +515,14 @@ impl Game {
                 Ok(Some(client_info)) => client_infos.push(client_info),
                 Ok(None) => {
                     // Client ID exists in game but not in global registry - this shouldn't happen
-                    log_warning(&format!("Client ID {client_id} registered in game but not found in global registry"));
+                    log(LogLevel::Warning, MODULE_NAME, &format!("Client ID {client_id} registered in game but not found in global registry"));
                 }
                 Err(e) => {
                     return Err(format!("Failed to get client info for {client_id}: {e}"));
                 }
             }
         }
-        
+
         Ok(client_infos)
     }
 

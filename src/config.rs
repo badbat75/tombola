@@ -3,9 +3,35 @@ use std::fs;
 use std::path::Path;
 
 #[derive(Debug, Clone)]
+pub enum LoggingMode {
+    Console,
+    File,
+    Both,
+}
+
+impl Default for LoggingMode {
+    fn default() -> Self {
+        LoggingMode::Console
+    }
+}
+
+impl From<&str> for LoggingMode {
+    fn from(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "console" => LoggingMode::Console,
+            "file" => LoggingMode::File,
+            "both" => LoggingMode::Both,
+            _ => LoggingMode::Console, // Default fallback
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
+    pub logging: LoggingMode,
+    pub logpath: String,
 }
 
 #[derive(Debug, Clone)]
@@ -22,6 +48,8 @@ impl Default for ServerConfig {
         Self {
             host: "127.0.0.1".to_string(),
             port: 3000,
+            logging: LoggingMode::default(),
+            logpath: "./logs".to_string(),
         }
     }
 }
@@ -99,7 +127,15 @@ impl ServerConfig {
             .and_then(|p| p.parse::<u16>().ok())
             .unwrap_or(3000);
 
-        Ok(ServerConfig { host, port })
+        let logging = config_map.get("logging")
+            .map(|l| LoggingMode::from(l.as_str()))
+            .unwrap_or_default();
+
+        let logpath = config_map.get("logpath")
+            .cloned()
+            .unwrap_or_else(|| "./logs".to_string());
+
+        Ok(ServerConfig { host, port, logging, logpath })
     }
 
     #[must_use] pub fn load_or_default() -> Self {
@@ -165,6 +201,35 @@ mod tests {
         let config = ServerConfig::default();
         assert_eq!(config.host, "127.0.0.1");
         assert_eq!(config.port, 3000);
+        assert!(matches!(config.logging, LoggingMode::Console));
+        assert_eq!(config.logpath, "./logs");
+    }
+
+    #[test]
+    fn test_logging_mode_from_string() {
+        assert!(matches!(LoggingMode::from("console"), LoggingMode::Console));
+        assert!(matches!(LoggingMode::from("file"), LoggingMode::File));
+        assert!(matches!(LoggingMode::from("both"), LoggingMode::Both));
+        assert!(matches!(LoggingMode::from("CONSOLE"), LoggingMode::Console));
+        assert!(matches!(LoggingMode::from("FILE"), LoggingMode::File));
+        assert!(matches!(LoggingMode::from("BOTH"), LoggingMode::Both));
+        assert!(matches!(LoggingMode::from("invalid"), LoggingMode::Console)); // Default fallback
+    }
+
+    #[test]
+    fn test_server_config_with_logging() {
+        let content = r"
+            host = 192.168.1.100
+            port = 8080
+            logging = file
+            logpath = /var/log/tombola
+        ";
+
+        let config_map = parse_config(content).unwrap();
+        assert_eq!(config_map.get("host"), Some(&"192.168.1.100".to_string()));
+        assert_eq!(config_map.get("port"), Some(&"8080".to_string()));
+        assert_eq!(config_map.get("logging"), Some(&"file".to_string()));
+        assert_eq!(config_map.get("logpath"), Some(&"/var/log/tombola".to_string()));
     }
 
     #[test]

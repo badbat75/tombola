@@ -10,7 +10,7 @@ repository = "https://github.com/badbat75/tombola"
 [dependencies]
 rand = "0"
 crossterm = "0"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "signal"] }
 reqwest = { version = "0", features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

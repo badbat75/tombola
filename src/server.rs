@@ -1,6 +1,5 @@
 use std::sync::Arc;
 use std::net::SocketAddr;
-use std::sync::atomic::AtomicBool;
 
 use axum::{
     routing::{get, post},
@@ -9,10 +8,12 @@ use axum::{
 use tower_http::cors::CorsLayer;
 
 use crate::config::ServerConfig;
-use crate::logging::{log_info, log_error, log_error_stderr};
+use crate::logging::{log, LogLevel};
 use crate::game::GameRegistry;
 use crate::client::ClientRegistry;
 use crate::api_handlers::{handle_global_clientinfo, handle_global_clientinfo_by_id, handle_global_register, handle_global_gameslist, handle_global_newgame, handle_join, handle_generatecards, handle_listassignedcards, handle_getassignedcard, handle_board, handle_pouch, handle_scoremap, handle_status, handle_extract, handle_dumpgame};
+
+const MODULE_NAME: &str = "server";
 
 // Response structures for JSON serialization
 #[derive(serde::Serialize)]
@@ -27,15 +28,11 @@ pub struct AppState {
     pub config: ServerConfig,
 }
 
-#[must_use] pub fn start_server(config: ServerConfig) -> (tokio::task::JoinHandle<()>, Arc<AtomicBool>) {
-    let shutdown_signal = Arc::new(AtomicBool::new(false));
-    let _shutdown_clone = Arc::clone(&shutdown_signal);
+#[must_use] pub fn start_server(config: ServerConfig) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        // Create the GameRegistry (no initial game)
+        let game_registry = GameRegistry::new();
 
-    // Create the GameRegistry (no initial game)
-    let game_registry = GameRegistry::new();
-    log_info("GameRegistry created - no initial games");
-
-    let handle = tokio::spawn(async move {
         let app_state = Arc::new(AppState {
             game_registry,
             global_client_registry: ClientRegistry::new(),
@@ -67,20 +64,16 @@ pub struct AppState {
         let listener = match tokio::net::TcpListener::bind(&addr).await {
             Ok(listener) => listener,
             Err(e) => {
-                log_error_stderr(&format!("Failed to start API server: {e}"));
+                log(LogLevel::Error, MODULE_NAME, &format!("Failed to start API server: {e}"));
                 return;
             }
         };
 
-        log_info(&format!("Server starting on {addr}"));
-
-        // Use axum::serve to handle the server
+        // Use axum::serve to handle the server (without internal graceful shutdown)
         if let Err(err) = axum::serve(listener, app).await {
-            log_error(&format!("Server error: {err:?}"));
+            log(LogLevel::Error, MODULE_NAME, &format!("Server error: {err:?}"));
         }
 
-        log_info("Server shutdown complete");
-    });
-
-    (handle, shutdown_signal)
+        log(LogLevel::Info, MODULE_NAME, "Server shutdown complete");
+    })
 }

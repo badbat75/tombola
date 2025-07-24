@@ -14,9 +14,11 @@ use crate::card::{ListAssignedCardsResponse, AssignedCardInfo, GenerateCardsRequ
 use crate::board::{Board, BOARD_ID};
 use crate::pouch::Pouch;
 use crate::score::ScoreCard;
-use crate::logging::{log_info, log_error, log_warning};
+use crate::logging::{log, LogLevel};
 use crate::server::AppState;
 use crate::game::Game;
+
+const MODULE_NAME: &str = "api_handlers";
 
 // Response structures for JSON serialization
 #[derive(serde::Serialize)]
@@ -84,7 +86,7 @@ pub async fn handle_join(
     State(app_state): State<Arc<AppState>>,
     JsonExtractor(request): JsonExtractor<RegisterRequest>,
 ) -> Result<Json<RegisterResponse>, ApiError> {
-    log_info(&format!("Client registration request for game '{game_id}': {request:?}"));
+    log(LogLevel::Info, MODULE_NAME, &format!("Client registration request for game '{game_id}': {request:?}"));
 
     let game = get_game_from_registry(&app_state, &game_id).await?;
 
@@ -103,19 +105,22 @@ pub async fn handle_join(
 
             // Add to global registry
             if let Err(e) = app_state.global_client_registry.insert(new_client.clone()) {
-                log_error(&format!("Failed to add client to global registry: {e}"));
+                log(LogLevel::Error, MODULE_NAME, &format!("Failed to add client to global registry: {e}"));
                 return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to register client globally"));
             }
 
             new_client
         }
         Err(e) => {
-            log_error(&format!("Failed to access global client registry: {e}"));
+            log(LogLevel::Error, MODULE_NAME, &format!("Failed to access global client registry: {e}"));
             return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to access global client registry"));
         }
     };
 
     let client_id = client_info.id.clone();
+
+    // Log with client ID now that we have it
+    log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Processing registration for game '{game_id}'"));
 
     // Check if client is already registered to this specific game
     if game.contains_client(&client_id) {
@@ -129,33 +134,33 @@ pub async fn handle_join(
     match game.add_client(client_id.clone()) {
         Ok(added) => {
             if added {
-                log_info(&format!("Client registered successfully in game '{game_id}': {client_id}"));
+                log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Registered successfully in game '{game_id}'"));
             } else {
-                log_info(&format!("Client already registered in game '{game_id}': {client_id}"));
+                log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Already registered in game '{game_id}'"));
             }
         }
         Err(e) => {
-            log_error(&format!("Failed to register client in game '{game_id}': {e}"));
+            log(LogLevel::Error, MODULE_NAME, &format!("[Client: {client_id}] Failed to register in game '{game_id}': {e}"));
             return Err(ApiError::new(StatusCode::CONFLICT, e));
         }
     }
 
     // Set the game-specific client type for this client in this game
     if let Err(e) = game.set_client_type(&client_id, client_type) {
-        log_error(&format!("Failed to set client type for '{client_id}' in game '{game_id}': {e}"));
+        log(LogLevel::Error, MODULE_NAME, &format!("[Client: {client_id}] Failed to set client type in game '{game_id}': {e}"));
         return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to set client type for game"));
     }
 
     // Check if client requested cards during registration, default to 1 if not specified
     let card_count = request.nocard.unwrap_or(1);
-    log_info(&format!("Generating {card_count} cards for client '{client_name}' during registration"));
+    log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Generating {card_count} cards during registration"));
 
     // Generate the requested number of cards using the card manager
     if let Ok(mut manager) = game.card_manager().lock() {
         manager.assign_cards_with_type(&client_id, card_count, Some(client_type));
-        log_info(&format!("Generated and assigned {card_count} cards to client '{client_name}' in game '{game_id}'"));
+        log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Generated and assigned {card_count} cards in game '{game_id}'"));
     } else {
-        log_warning(&format!("Failed to acquire card manager lock for client '{client_name}' in game '{game_id}'"));
+        log(LogLevel::Warning, MODULE_NAME, &format!("[Client: {client_id}] Failed to acquire card manager lock in game '{game_id}'"));
     }
 
     Ok(Json(RegisterResponse {
@@ -166,10 +171,28 @@ pub async fn handle_join(
 
 pub async fn handle_global_clientinfo(
     State(app_state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Query(params): Query<ClientNameQuery>,
 ) -> Result<Json<ClientInfoResponse>, ApiError> {
     let client_name = params.name.unwrap_or_default();
-    log_info(&format!("Client info request for: {client_name}"));
+
+    // Get optional client ID from headers for logging
+    let client_id_opt = if let Some(header_value) = headers.get("X-Client-ID") {
+        if let Ok(id) = header_value.to_str() {
+            Some(id.to_string())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Log with client ID if available
+    if let Some(client_id) = &client_id_opt {
+        log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Client info request for: {client_name}"));
+    } else {
+        log(LogLevel::Info, MODULE_NAME, &format!("Client info request for: {client_name}"));
+    }
 
     match app_state.global_client_registry.get_by_name(&client_name) {
         Ok(Some(client)) => {
@@ -184,7 +207,7 @@ pub async fn handle_global_clientinfo(
             Err(ApiError::new(StatusCode::NOT_FOUND, format!("Client '{client_name}' not found")))
         }
         Err(e) => {
-            log_error(&format!("Failed to access global client registry: {e}"));
+            log(LogLevel::Error, MODULE_NAME, &format!("Failed to access global client registry: {e}"));
             Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to access global client registry"))
         }
     }
@@ -194,7 +217,7 @@ pub async fn handle_global_clientinfo_by_id(
     State(app_state): State<Arc<AppState>>,
     Path(client_id): Path<String>,
 ) -> Result<Json<ClientInfoResponse>, ApiError> {
-    log_info(&format!("Client info by ID request for: {client_id}"));
+    log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Client info by ID request"));
 
     // Handle special case for board client ID
     if client_id == BOARD_ID {
@@ -221,7 +244,7 @@ pub async fn handle_global_clientinfo_by_id(
             }
         }
         Err(e) => {
-            log_error(&format!("Failed to access global client registry: {e}"));
+            log(LogLevel::Error, MODULE_NAME, &format!("[Client: {client_id}] Failed to access global client registry: {e}"));
             return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to access global client registry"));
         }
     }
@@ -232,9 +255,26 @@ pub async fn handle_global_clientinfo_by_id(
 
 pub async fn handle_global_register(
     State(app_state): State<Arc<AppState>>,
+    headers: HeaderMap,
     JsonExtractor(request): JsonExtractor<RegisterRequest>,
 ) -> Result<Json<RegisterResponse>, ApiError> {
-    log_info(&format!("Global client registration request: {request:?}"));
+    // Get optional client ID from headers for logging
+    let client_id_opt = if let Some(header_value) = headers.get("X-Client-ID") {
+        if let Ok(id) = header_value.to_str() {
+            Some(id.to_string())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Log with client ID if available
+    if let Some(client_id) = &client_id_opt {
+        log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Global client registration request: {request:?}"));
+    } else {
+        log(LogLevel::Info, MODULE_NAME, &format!("Global client registration request: {request:?}"));
+    }
 
     let client_name = &request.name;
     let client_type = &request.client_type;
@@ -244,6 +284,7 @@ pub async fn handle_global_register(
     match app_state.global_client_registry.get_by_name(client_name) {
         Ok(Some(existing_client)) => {
             // Client already exists globally
+            log(LogLevel::Info, MODULE_NAME, &format!("[Client: {}] Client '{}' already registered globally", existing_client.id, client_name));
             Ok(Json(RegisterResponse {
                 client_id: existing_client.id.clone(),
                 message: format!("Client '{client_name}' already registered globally"),
@@ -256,20 +297,20 @@ pub async fn handle_global_register(
             // Add to global registry
             match app_state.global_client_registry.insert(new_client.clone()) {
                 Ok(_) => {
-                    log_info(&format!("Successfully registered client '{client_name}' globally with ID: {}", new_client.id));
+                    log(LogLevel::Info, MODULE_NAME, &format!("[Client: {}] Successfully registered client '{}' globally with ID: {}", new_client.id, client_name, new_client.id));
                     Ok(Json(RegisterResponse {
                         client_id: new_client.id.clone(),
                         message: format!("Client '{client_name}' registered successfully globally"),
                     }))
                 }
                 Err(e) => {
-                    log_error(&format!("Failed to add client to global registry: {e}"));
+                    log(LogLevel::Error, MODULE_NAME, &format!("Failed to add client to global registry: {e}"));
                     Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to register client globally"))
                 }
             }
         }
         Err(e) => {
-            log_error(&format!("Failed to access global client registry: {e}"));
+            log(LogLevel::Error, MODULE_NAME, &format!("Failed to access global client registry: {e}"));
             Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to access global client registry"))
         }
     }
@@ -281,20 +322,22 @@ pub async fn handle_generatecards(
     headers: HeaderMap,
     JsonExtractor(request): JsonExtractor<GenerateCardsRequest>,
 ) -> Result<Json<GenerateCardsResponse>, ApiError> {
-    log_info(&format!("Generate cards request for game: {game_id}"));
-
-    let game = get_game_from_registry(&app_state, &game_id).await?;
-
-    // Get client ID from headers
+    // Get client ID from headers first, so we can use it in logging
     let client_id = if let Some(header_value) = headers.get("X-Client-ID") {
-        if let Ok(id) = header_value.to_str() { id.to_string() } else {
-            log_error("Invalid client ID in header");
+        if let Ok(id) = header_value.to_str() {
+            id.to_string()
+        } else {
+            log(LogLevel::Error, MODULE_NAME, "Invalid client ID in header");
             return Err(ApiError::new(StatusCode::BAD_REQUEST, "Invalid client ID in header"));
         }
     } else {
-        log_error("Client ID header (X-Client-ID) is required");
+        log(LogLevel::Error, MODULE_NAME, "Client ID header (X-Client-ID) is required");
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "Client ID header (X-Client-ID) is required"));
     };
+
+    log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Generate cards request for game: {game_id}"));
+
+    let game = get_game_from_registry(&app_state, &game_id).await?;
 
     // Verify client is registered and get their info
     match game.get_client_info(&client_id, &app_state.global_client_registry) {
@@ -302,11 +345,11 @@ pub async fn handle_generatecards(
             // Client is registered and found in global registry
         }
         Ok(None) => {
-            log_error("Client not registered");
+            log(LogLevel::Error, MODULE_NAME, &format!("[Client: {client_id}] Not registered"));
             return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Client not registered"));
         }
         Err(e) => {
-            log_error(&format!("Failed to verify client registration: {e}"));
+            log(LogLevel::Error, MODULE_NAME, &format!("[Client: {client_id}] Failed to verify registration: {e}"));
             return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to verify client registration"));
         }
     }
@@ -315,7 +358,7 @@ pub async fn handle_generatecards(
     if let Ok(manager) = game.card_manager().lock() {
         if let Some(existing_cards) = manager.get_client_cards(&client_id) {
             if !existing_cards.is_empty() {
-                log_error("Client already has cards assigned. Card generation is only allowed during registration.");
+                log(LogLevel::Error, MODULE_NAME, &format!("[Client: {client_id}] Already has cards assigned. Card generation is only allowed during registration."));
                 return Err(ApiError::new(StatusCode::CONFLICT, "Client already has cards assigned. Card generation is only allowed during registration."));
             }
         }
@@ -332,11 +375,11 @@ pub async fn handle_generatecards(
         let (cards, _) = manager.assign_cards_with_type(&client_id, request.count, client_type.as_deref());
         cards
     } else {
-        log_error("Failed to acquire card manager lock");
+        log(LogLevel::Error, MODULE_NAME, "Failed to acquire card manager lock");
         return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to acquire card manager lock"));
     };
 
-    log_info(&format!("Generated {} cards for client {}", card_infos.len(), client_id));
+    log(LogLevel::Info, MODULE_NAME, &format!("[Client: {}] Generated {} cards for client {}", client_id, card_infos.len(), client_id));
 
     // Create response
     let response = GenerateCardsResponse {
@@ -353,20 +396,22 @@ pub async fn handle_listassignedcards(
     headers: HeaderMap,
     Query(_params): Query<ClientIdQuery>,
 ) -> Result<Json<ListAssignedCardsResponse>, ApiError> {
-    log_info(&format!("List assigned cards request for game: {game_id}"));
-
-    let game = get_game_from_registry(&app_state, &game_id).await?;
-
-    // Get client ID from headers
+    // Get client ID from headers first
     let client_id = if let Some(header_value) = headers.get("X-Client-ID") {
-        if let Ok(id) = header_value.to_str() { id.to_string() } else {
-            log_error("Invalid client ID in header");
+        if let Ok(id) = header_value.to_str() {
+            id.to_string()
+        } else {
+            log(LogLevel::Error, MODULE_NAME, "Invalid client ID in header");
             return Err(ApiError::new(StatusCode::BAD_REQUEST, "Invalid client ID in header"));
         }
     } else {
-        log_error("Client ID header (X-Client-ID) is required");
+        log(LogLevel::Error, MODULE_NAME, "Client ID header (X-Client-ID) is required");
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "Client ID header (X-Client-ID) is required"));
     };
+
+    log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] List assigned cards request for game: {game_id}"));
+
+    let game = get_game_from_registry(&app_state, &game_id).await?;
 
     // Verify client is registered and get their info
     match game.get_client_info(&client_id, &app_state.global_client_registry) {
@@ -374,11 +419,11 @@ pub async fn handle_listassignedcards(
             // Client is registered and found in global registry
         }
         Ok(None) => {
-            log_error("Client not registered");
+            log(LogLevel::Error, MODULE_NAME, &format!("[Client: {client_id}] Client not registered"));
             return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Client not registered"));
         }
         Err(e) => {
-            log_error(&format!("Failed to verify client registration: {e}"));
+            log(LogLevel::Error, MODULE_NAME, &format!("[Client: {client_id}] Failed to verify client registration: {e}"));
             return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to verify client registration"));
         }
     }
@@ -410,30 +455,30 @@ pub async fn handle_getassignedcard(
     Path((game_id, card_id)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    log_info(&format!("Get assigned card request for game: {game_id}, card ID: {card_id}"));
-
-    let game = get_game_from_registry(&app_state, &game_id).await?;
-
-    // Get client ID from headers
+    // Get client ID from headers first
     let client_id = if let Some(header_value) = headers.get("X-Client-ID") {
         if let Ok(id) = header_value.to_str() { id.to_string() } else {
-            log_error("Invalid client ID in header");
+            log(LogLevel::Error, MODULE_NAME, "Invalid client ID in header");
             return Err(ApiError::new(StatusCode::BAD_REQUEST, "Invalid client ID in header"));
         }
     } else {
-        log_error("Client ID header (X-Client-ID) is required");
+        log(LogLevel::Error, MODULE_NAME, "Client ID header (X-Client-ID) is required");
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "Client ID header (X-Client-ID) is required"));
     };
+
+    log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Get assigned card request for game: {game_id}, card ID: {card_id}"));
+
+    let game = get_game_from_registry(&app_state, &game_id).await?;
 
     // Verify client is registered and get their info
     let _client_info = match game.get_client_info(&client_id, &app_state.global_client_registry) {
         Ok(Some(info)) => info,
         Ok(None) => {
-            log_error(&format!("Client not registered: {client_id}"));
+            log(LogLevel::Error, MODULE_NAME, &format!("[Client: {client_id}] Client not registered: {client_id}"));
             return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Client not registered"));
         }
         Err(e) => {
-            log_error(&format!("Failed to check client registration: {e}"));
+            log(LogLevel::Error, MODULE_NAME, &format!("[Client: {client_id}] Failed to check client registration: {e}"));
             return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Internal error"));
         }
     };
@@ -448,12 +493,12 @@ pub async fn handle_getassignedcard(
     // Verify the card exists and belongs to the client
     let card_assignment = if let Some(assignment) = card_assignment {
         if assignment.client_id != client_id {
-            log_error(&format!("Card {card_id} not assigned to client {client_id}"));
+            log(LogLevel::Error, MODULE_NAME, &format!("Card {card_id} not assigned to client {client_id}"));
             return Err(ApiError::new(StatusCode::FORBIDDEN, "Card not assigned to this client"));
         }
         assignment
     } else {
-        log_error(&format!("Card not found: {card_id}"));
+        log(LogLevel::Error, MODULE_NAME, &format!("Card not found: {card_id}"));
         return Err(ApiError::new(StatusCode::NOT_FOUND, "Card not found"));
     };
 
@@ -469,9 +514,26 @@ pub async fn handle_getassignedcard(
 pub async fn handle_board(
     State(app_state): State<Arc<AppState>>,
     Path(game_id): Path<String>,
+    headers: HeaderMap,
     Query(_params): Query<ClientIdQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    log_info(&format!("Board request for game: {game_id}"));
+    // Get optional client ID from headers for logging
+    let client_id_opt = if let Some(header_value) = headers.get("X-Client-ID") {
+        if let Ok(id) = header_value.to_str() {
+            Some(id.to_string())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Log with client ID if available
+    if let Some(client_id) = &client_id_opt {
+        log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Board request for game: {game_id}"));
+    } else {
+        log(LogLevel::Info, MODULE_NAME, &format!("Board request for game: {game_id}"));
+    }
 
     let game = get_game_from_registry(&app_state, &game_id).await?;
 
@@ -487,9 +549,26 @@ pub async fn handle_board(
 pub async fn handle_pouch(
     State(app_state): State<Arc<AppState>>,
     Path(game_id): Path<String>,
+    headers: HeaderMap,
     Query(_params): Query<ClientIdQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    log_info(&format!("Pouch request for game: {game_id}"));
+    // Check for optional client ID in headers
+    let client_id_opt = if let Some(header_value) = headers.get("X-Client-ID") {
+        if let Ok(id) = header_value.to_str() {
+            Some(id.to_string())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Log with client ID if available
+    if let Some(client_id) = &client_id_opt {
+        log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Pouch request for game: {game_id}"));
+    } else {
+        log(LogLevel::Info, MODULE_NAME, &format!("Pouch request for game: {game_id}"));
+    }
 
     let game = get_game_from_registry(&app_state, &game_id).await?;
 
@@ -505,9 +584,26 @@ pub async fn handle_pouch(
 pub async fn handle_scoremap(
     State(app_state): State<Arc<AppState>>,
     Path(game_id): Path<String>,
+    headers: HeaderMap,
     Query(_params): Query<ClientIdQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    log_info(&format!("Score map request for game: {game_id}"));
+    // Get optional client ID from headers for logging
+    let client_id_opt = if let Some(header_value) = headers.get("X-Client-ID") {
+        if let Ok(id) = header_value.to_str() {
+            Some(id.to_string())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Log with client ID if available
+    if let Some(client_id) = &client_id_opt {
+        log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Score map request for game: {game_id}"));
+    } else {
+        log(LogLevel::Info, MODULE_NAME, &format!("Score map request for game: {game_id}"));
+    }
 
     let game = get_game_from_registry(&app_state, &game_id).await?;
 
@@ -523,9 +619,26 @@ pub async fn handle_scoremap(
 pub async fn handle_status(
     State(app_state): State<Arc<AppState>>,
     Path(game_id): Path<String>,
+    headers: HeaderMap,
     Query(_params): Query<ClientIdQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    log_info(&format!("Status request for game: {game_id}"));
+    // Get optional client ID from headers for logging
+    let client_id_opt = if let Some(header_value) = headers.get("X-Client-ID") {
+        if let Ok(id) = header_value.to_str() {
+            Some(id.to_string())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Log with client ID if available
+    if let Some(client_id) = &client_id_opt {
+        log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Status request for game: {game_id}"));
+    } else {
+        log(LogLevel::Info, MODULE_NAME, &format!("Status request for game: {game_id}"));
+    }
 
     let game = get_game_from_registry(&app_state, &game_id).await?;
 
@@ -561,24 +674,24 @@ pub async fn handle_extract(
     headers: HeaderMap,
     Query(_params): Query<ClientIdQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    log_info(&format!("Extract request for game: {game_id}"));
-
-    let game = get_game_from_registry(&app_state, &game_id).await?;
-
-    // Get client ID from headers for authentication
+    // Get client ID from headers for authentication first
     let client_id = if let Some(header_value) = headers.get("X-Client-ID") {
         if let Ok(id) = header_value.to_str() { id.to_string() } else {
-            log_error("Invalid client ID in header");
+            log(LogLevel::Error, MODULE_NAME, "Invalid client ID in header");
             return Err(ApiError::new(StatusCode::BAD_REQUEST, "Invalid client ID in header"));
         }
     } else {
-        log_error("Client ID header (X-Client-ID) is required");
+        log(LogLevel::Error, MODULE_NAME, "Client ID header (X-Client-ID) is required");
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "Client ID header (X-Client-ID) is required"));
     };
 
+    log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Extract request for game: {game_id}"));
+
+    let game = get_game_from_registry(&app_state, &game_id).await?;
+
     // Check if the client is registered to this game
     if !game.contains_client(&client_id) {
-        log_error(&format!("Client {client_id} is not registered to game {game_id}"));
+        log(LogLevel::Error, MODULE_NAME, &format!("Client {client_id} is not registered to game {game_id}"));
         return Err(ApiError::new(StatusCode::FORBIDDEN, "Client must be registered to this game"));
     }
 
@@ -586,12 +699,12 @@ pub async fn handle_extract(
     match game.is_client_type(&client_id, "board") {
         Ok(is_board) => {
             if !is_board {
-                log_error(&format!("Unauthorized: Only board clients can extract numbers, client ID: {client_id}"));
+                log(LogLevel::Error, MODULE_NAME, &format!("Unauthorized: Only board clients can extract numbers, client ID: {client_id}"));
                 return Err(ApiError::new(StatusCode::FORBIDDEN, "Unauthorized: Only board clients can extract numbers"));
             }
         }
         Err(e) => {
-            log_error(&format!("Failed to check client type for '{client_id}' in game '{game_id}': {e}"));
+            log(LogLevel::Error, MODULE_NAME, &format!("Failed to check client type for '{client_id}' in game '{game_id}': {e}"));
             return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to verify client authorization"));
         }
     }
@@ -612,10 +725,10 @@ pub async fn handle_extract(
             if game.is_bingo_reached() {
                 match game.dump_to_json() {
                     Ok(dump_message) => {
-                        log_info(&format!("Game ended with BINGO! {dump_message}"));
+                        log(LogLevel::Info, MODULE_NAME, &format!("Game ended with BINGO! {dump_message}"));
                     }
                     Err(dump_error) => {
-                        log_error(&format!("Failed to dump game state: {dump_error}"));
+                        log(LogLevel::Error, MODULE_NAME, &format!("Failed to dump game state: {dump_error}"));
                     }
                 }
             }
@@ -630,7 +743,7 @@ pub async fn handle_extract(
         }
         Err(error_msg) => {
             // Handle extraction errors - match old behavior with proper status codes
-            log_error(&format!("Failed to extract number: {error_msg}"));
+            log(LogLevel::Error, MODULE_NAME, &format!("Failed to extract number: {error_msg}"));
             if error_msg.contains("empty") {
                 Err(ApiError::new(StatusCode::CONFLICT, error_msg))
             } else {
@@ -644,22 +757,22 @@ pub async fn handle_global_newgame(
     State(app_state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    log_info("New game request");
-
-    // Get client ID from headers for authentication
+    // Get client ID from headers for authentication first
     let client_id = if let Some(header_value) = headers.get("X-Client-ID") {
         if let Ok(id) = header_value.to_str() { id.to_string() } else {
-            log_error("Invalid client ID in header");
+            log(LogLevel::Error, MODULE_NAME, "Invalid client ID in header");
             return Err(ApiError::new(StatusCode::BAD_REQUEST, "Invalid client ID in header"));
         }
     } else {
-        log_error("Client ID header (X-Client-ID) is required");
+        log(LogLevel::Error, MODULE_NAME, "Client ID header (X-Client-ID) is required");
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "Client ID header (X-Client-ID) is required"));
     };
 
+    log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] New game request"));
+
     // Only allow board client (ID: "0000000000000000") to create a new game
     if client_id != BOARD_ID {
-        log_error("Unauthorized: Only board client can create a new game");
+        log(LogLevel::Error, MODULE_NAME, &format!("[Client: {client_id}] Unauthorized: Only board client can create a new game"));
         return Err(ApiError::new(StatusCode::FORBIDDEN, "Unauthorized: Only board client can create a new game"));
     }
 
@@ -668,16 +781,16 @@ pub async fn handle_global_newgame(
     let new_game_id = new_game.id();
     let new_game_created_at = new_game.created_at_string();
 
-    log_info(&format!("Created new game: {}", new_game.game_info()));
+    log(LogLevel::Info, MODULE_NAME, &format!("Created new game: {}", new_game.game_info()));
 
     // Add the new game to the registry
     let new_game_arc = Arc::new(new_game.clone());
     match app_state.game_registry.add_game(new_game_arc) {
         Ok(registered_id) => {
-            log_info(&format!("Registered new game in registry: {registered_id}"));
+            log(LogLevel::Info, MODULE_NAME, &format!("Registered new game in registry: {registered_id}"));
         }
         Err(e) => {
-            log_error(&format!("Failed to register new game in registry: {e}"));
+            log(LogLevel::Error, MODULE_NAME, &format!("Failed to register new game in registry: {e}"));
             return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to register new game: {e}")));
         }
     }
@@ -701,31 +814,31 @@ pub async fn handle_dumpgame(
     Path(game_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    log_info(&format!("Dump game request for game: {game_id}"));
-
-    let game = get_game_from_registry(&app_state, &game_id).await?;
-
-    // Check for client authentication header
+    // Check for client authentication header first
     let client_id = if let Some(header_value) = headers.get("X-Client-ID") {
         if let Ok(id) = header_value.to_str() { id } else {
-            log_error("Invalid X-Client-ID header");
+            log(LogLevel::Error, MODULE_NAME, "Invalid X-Client-ID header");
             return Err(ApiError::new(StatusCode::BAD_REQUEST, "Invalid X-Client-ID header"));
         }
     } else {
-        log_error("Missing X-Client-ID header");
+        log(LogLevel::Error, MODULE_NAME, "Missing X-Client-ID header");
         return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Missing X-Client-ID header"));
     };
+
+    log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Dump game request for game: {game_id}"));
+
+    let game = get_game_from_registry(&app_state, &game_id).await?;
 
     // Only allow board client type to dump the game - check game-specific client type
     match game.is_client_type(client_id, "board") {
         Ok(is_board) => {
             if !is_board {
-                log_error(&format!("Unauthorized: Only board clients can dump the game, client ID: {client_id}"));
+                log(LogLevel::Error, MODULE_NAME, &format!("Unauthorized: Only board clients can dump the game, client ID: {client_id}"));
                 return Err(ApiError::new(StatusCode::FORBIDDEN, "Unauthorized: Only board clients can dump the game"));
             }
         }
         Err(e) => {
-            log_error(&format!("Failed to check client type for '{client_id}' in game '{game_id}': {e}"));
+            log(LogLevel::Error, MODULE_NAME, &format!("Failed to check client type for '{client_id}' in game '{game_id}': {e}"));
             return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to verify client authorization"));
         }
     }
@@ -733,7 +846,7 @@ pub async fn handle_dumpgame(
     // Dump the game state to JSON
     match game.dump_to_json() {
         Ok(dump_message) => {
-            log_info(&format!("Game manually dumped: {dump_message}"));
+            log(LogLevel::Info, MODULE_NAME, &format!("Game manually dumped: {dump_message}"));
             Ok(Json(json!({
                 "success": true,
                 "message": dump_message,
@@ -744,7 +857,7 @@ pub async fn handle_dumpgame(
             })))
         }
         Err(dump_error) => {
-            log_error(&format!("Manual game dump failed: {dump_error}"));
+            log(LogLevel::Error, MODULE_NAME, &format!("Manual game dump failed: {dump_error}"));
             Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to dump game: {dump_error}")))
         }
     }
@@ -752,8 +865,25 @@ pub async fn handle_dumpgame(
 
 pub async fn handle_global_gameslist(
     State(app_state): State<Arc<AppState>>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    log_info("Games list request");
+    // Check for optional client ID in headers
+    let client_id_opt = if let Some(header_value) = headers.get("X-Client-ID") {
+        if let Ok(id) = header_value.to_str() {
+            Some(id.to_string())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Log with client ID if available
+    if let Some(client_id) = &client_id_opt {
+        log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Games list request"));
+    } else {
+        log(LogLevel::Info, MODULE_NAME, "Games list request");
+    }
 
     // Get all games from the registry
     let games_result = app_state.game_registry.games_list();
@@ -817,7 +947,7 @@ pub async fn handle_global_gameslist(
             })))
         }
         Err(error) => {
-            log_error(&format!("Failed to get games list: {error}"));
+            log(LogLevel::Error, MODULE_NAME, &format!("Failed to get games list: {error}"));
             Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get games list: {error}")))
         }
     }
@@ -859,10 +989,10 @@ mod tests {
         match newgame_result {
             Ok(response) => {
                 let game_id = response["game_id"].as_str().unwrap().to_string();
-                
+
                 // Register BOARD_ID as a board client for this new game using API
                 register_board_client_to_game(app_state, &game_id).await;
-                
+
                 game_id
             }
             Err(_) => panic!("Failed to create test game via API"),
@@ -885,7 +1015,7 @@ mod tests {
             registered_at: std::time::SystemTime::now(),
             email: String::new(),
         };
-        
+
         // Add to global registry (this will not overwrite if already exists)
         let _ = app_state.global_client_registry.insert(board_client_info);
 
@@ -906,7 +1036,7 @@ mod tests {
         // This should succeed since we're registering a board client
         assert!(join_result.is_ok(), "Failed to register board client to game {game_id}");
         let join_response = join_result.unwrap();
-        
+
         // Verify the board client got the expected BOARD_ID
         assert_eq!(join_response.client_id, BOARD_ID, "Board client should have BOARD_ID");
     }
@@ -995,10 +1125,10 @@ mod tests {
 
         // Start the game by extracting a number through the API
         let game_id = create_test_game(&app_state).await;
-        
+
         // Register BOARD_ID as a board client for this game using API
         register_board_client_to_game(&app_state, &game_id).await;
-        
+
         let mut board_headers = HeaderMap::new();
         board_headers.insert("X-Client-ID", BOARD_ID.parse().unwrap());
 
@@ -1035,6 +1165,7 @@ mod tests {
 
         let result = handle_global_clientinfo(
             State(app_state.clone()),
+            HeaderMap::new(),
             Query(query),
         ).await;
 
@@ -1055,6 +1186,7 @@ mod tests {
 
         let result = handle_global_clientinfo(
             State(app_state.clone()),
+            HeaderMap::new(),
             Query(query),
         ).await;
 
@@ -1295,6 +1427,7 @@ mod tests {
         let result = handle_board(
             State(app_state.clone()),
             Path(game_id),
+            HeaderMap::new(),
             Query(ClientIdQuery { client_id: None }),
         ).await;
 
@@ -1333,6 +1466,7 @@ mod tests {
         let result = handle_board(
             State(app_state.clone()),
             Path(game_id),
+            HeaderMap::new(),
             Query(ClientIdQuery { client_id: None }),
         ).await;
 
@@ -1353,6 +1487,7 @@ mod tests {
         let result = handle_pouch(
             State(app_state.clone()),
             Path(game_id),
+            HeaderMap::new(),
             Query(ClientIdQuery { client_id: None }),
         ).await;
 
@@ -1383,6 +1518,7 @@ mod tests {
         let result = handle_pouch(
             State(app_state.clone()),
             Path(game_id),
+            HeaderMap::new(),
             Query(ClientIdQuery { client_id: None }),
         ).await;
 
@@ -1399,6 +1535,7 @@ mod tests {
         let result = handle_scoremap(
             State(app_state.clone()),
             Path(game_id),
+            HeaderMap::new(),
             Query(ClientIdQuery { client_id: None }),
         ).await;
 
@@ -1416,6 +1553,7 @@ mod tests {
         let result = handle_status(
             State(app_state.clone()),
             Path(game_id),
+            HeaderMap::new(),
             Query(ClientIdQuery { client_id: None }),
         ).await;
 
@@ -1433,10 +1571,10 @@ mod tests {
     async fn test_handle_extract_success() {
         let app_state = create_test_app_state();
         let game_id = get_test_game_id(&app_state).await;
-        
+
         // Register BOARD_ID as a board client for this game using API
         register_board_client_to_game(&app_state, &game_id).await;
-        
+
         let mut headers = HeaderMap::new();
         headers.insert("X-Client-ID", BOARD_ID.parse().unwrap()); // Board client
 
@@ -1500,10 +1638,10 @@ mod tests {
     async fn test_handle_newgame_success() {
         let app_state = create_test_app_state();
         let game_id = get_test_game_id(&app_state).await;
-        
+
         // Register BOARD_ID as a board client for the original game using API
         register_board_client_to_game(&app_state, &game_id).await;
-        
+
         let mut headers = HeaderMap::new();
         headers.insert("X-Client-ID", BOARD_ID.parse().unwrap()); // Board client
 
@@ -1555,10 +1693,10 @@ mod tests {
     async fn test_handle_dumpgame_success() {
         let app_state = create_test_app_state();
         let game_id = get_test_game_id(&app_state).await;
-        
+
         // Register BOARD_ID as a board client for this game using API
         register_board_client_to_game(&app_state, &game_id).await;
-        
+
         let mut headers = HeaderMap::new();
         headers.insert("X-Client-ID", BOARD_ID.parse().unwrap()); // Board client
 
@@ -1673,6 +1811,7 @@ mod tests {
         let board_result = handle_board(
             State(app_state.clone()),
             Path(game_id.clone()),
+            HeaderMap::new(),
             Query(ClientIdQuery { client_id: None }),
         ).await;
         assert!(board_result.is_ok());
@@ -1683,6 +1822,7 @@ mod tests {
         let status_result = handle_status(
             State(app_state.clone()),
             Path(game_id),
+            HeaderMap::new(),
             Query(ClientIdQuery { client_id: None }),
         ).await;
         assert!(status_result.is_ok());
@@ -1698,7 +1838,8 @@ mod tests {
         let _game_id = create_test_game(&app_state).await;
 
         // Test the games list endpoint
-        let result = handle_global_gameslist(State(app_state.clone())).await;
+        let empty_headers = HeaderMap::new();
+        let result = handle_global_gameslist(State(app_state.clone()), empty_headers).await;
         assert!(result.is_ok());
 
         let response = result.unwrap();
@@ -1735,10 +1876,10 @@ mod tests {
         // Create an active game via API and make it active by extracting numbers
         let active_game_id = create_test_game(&app_state).await;
         register_board_client_to_game(&app_state, &active_game_id).await;
-        
+
         let mut board_headers = HeaderMap::new();
         board_headers.insert("X-Client-ID", BOARD_ID.parse().unwrap());
-        
+
         // Extract a number to make it active
         let _ = handle_extract(
             State(app_state.clone()),
@@ -1748,7 +1889,8 @@ mod tests {
         ).await.unwrap();
 
         // Test the games list endpoint - we now have 2 games (1 new, 1 active)
-        let result = handle_global_gameslist(State(app_state.clone())).await;
+        let empty_headers = HeaderMap::new();
+        let result = handle_global_gameslist(State(app_state.clone()), empty_headers).await;
         assert!(result.is_ok());
 
         let response = result.unwrap();
@@ -1790,7 +1932,7 @@ mod tests {
         println!("🎲 Starting comprehensive multi-game test with 3 games, 2 clients each, 6 cards per client");
 
         let app_state = create_test_app_state();
-        
+
         // Register BOARD_ID as a board client for the original game using API
         let original_game_id = get_test_game_id(&app_state).await;
         register_board_client_to_game(&app_state, &original_game_id).await;
@@ -1807,16 +1949,17 @@ mod tests {
 
             let newgame_response = newgame_result.unwrap();
             let game_id = newgame_response["game_id"].as_str().unwrap().to_string();
-            
+
             // Register BOARD_ID as a board client for this new game using API
             register_board_client_to_game(&app_state, &game_id).await;
-            
+
             game_ids.push(game_id.clone());
             println!("✅ Created game {i} with ID: {game_id}");
         }
 
         // Verify we have 4 games total (original + 3 new)
-        let games_list_result = handle_global_gameslist(State(app_state.clone())).await;
+        let empty_headers = HeaderMap::new();
+        let games_list_result = handle_global_gameslist(State(app_state.clone()), empty_headers).await;
         assert!(games_list_result.is_ok());
         let games_list_response = games_list_result.unwrap();
         assert_eq!(games_list_response["total_games"], 4);
@@ -1904,6 +2047,7 @@ mod tests {
                 let board_result = handle_board(
                     State(app_state.clone()),
                     Path(game_id.clone()),
+                    HeaderMap::new(),
                     Query(ClientIdQuery { client_id: None }),
                 ).await;
 
@@ -1949,6 +2093,7 @@ mod tests {
             let final_status_result = handle_status(
                 State(app_state.clone()),
                 Path(game_id.clone()),
+                HeaderMap::new(),
                 Query(ClientIdQuery { client_id: None }),
             ).await;
 
@@ -1978,7 +2123,8 @@ mod tests {
         // Step 4: Final verification - check games list shows all games as closed
         println!("\n📋 Final verification of all games");
 
-        let final_games_list = handle_global_gameslist(State(app_state.clone())).await;
+        let empty_headers = HeaderMap::new();
+        let final_games_list = handle_global_gameslist(State(app_state.clone()), empty_headers).await;
         assert!(final_games_list.is_ok());
         let final_response = final_games_list.unwrap();
 
@@ -2080,6 +2226,7 @@ mod tests {
 
         let clientinfo_by_name_result = handle_global_clientinfo(
             State(app_state.clone()),
+            HeaderMap::new(),
             Query(client_info_by_name_query),
         ).await;
 
@@ -2169,6 +2316,7 @@ mod tests {
         // Step 10: Verify both clients are in global registry
         let global_client_info_result = handle_global_clientinfo(
             State(app_state.clone()),
+            HeaderMap::new(),
             Query(ClientNameQuery { name: Some(different_client_name.to_string()) }),
         ).await;
 
@@ -2197,7 +2345,7 @@ mod tests {
             email: None,
         };
 
-        let result = handle_global_register(State(app_state.clone()), JsonExtractor(request)).await;
+        let result = handle_global_register(State(app_state.clone()), HeaderMap::new(), JsonExtractor(request)).await;
 
         assert!(result.is_ok());
         let response = result.unwrap();
@@ -2223,7 +2371,7 @@ mod tests {
             email: Some("test@example.com".to_string()),
         };
 
-        let result = handle_global_register(State(app_state.clone()), JsonExtractor(request)).await;
+        let result = handle_global_register(State(app_state.clone()), HeaderMap::new(), JsonExtractor(request)).await;
 
         assert!(result.is_ok());
         let response = result.unwrap();
@@ -2241,7 +2389,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_global_register_existing_client() {
         let app_state = create_test_app_state();
-        
+
         // First registration
         let request1 = RegisterRequest {
             name: "global_existing_player".to_string(),
@@ -2250,7 +2398,7 @@ mod tests {
             email: Some("first@example.com".to_string()),
         };
 
-        let result1 = handle_global_register(State(app_state.clone()), JsonExtractor(request1)).await;
+        let result1 = handle_global_register(State(app_state.clone()), HeaderMap::new(), JsonExtractor(request1)).await;
         assert!(result1.is_ok());
         let response1 = result1.unwrap();
         let first_client_id = response1.client_id.clone();
@@ -2263,7 +2411,7 @@ mod tests {
             email: Some("second@example.com".to_string()), // Different email
         };
 
-        let result2 = handle_global_register(State(app_state.clone()), JsonExtractor(request2)).await;
+        let result2 = handle_global_register(State(app_state.clone()), HeaderMap::new(), JsonExtractor(request2)).await;
         assert!(result2.is_ok());
         let response2 = result2.unwrap();
 
@@ -2291,7 +2439,7 @@ mod tests {
             email: None,
         };
 
-        let player_result = handle_global_register(State(app_state.clone()), JsonExtractor(player_request)).await;
+        let player_result = handle_global_register(State(app_state.clone()), HeaderMap::new(), JsonExtractor(player_request)).await;
         assert!(player_result.is_ok());
 
         // Register an admin
@@ -2302,7 +2450,7 @@ mod tests {
             email: Some("admin@company.com".to_string()),
         };
 
-        let admin_result = handle_global_register(State(app_state.clone()), JsonExtractor(admin_request)).await;
+        let admin_result = handle_global_register(State(app_state.clone()), HeaderMap::new(), JsonExtractor(admin_request)).await;
         assert!(admin_result.is_ok());
 
         // Verify both are in registry with correct types
@@ -2331,7 +2479,7 @@ mod tests {
             email: Some("integration@test.com".to_string()),
         };
 
-        let global_result = handle_global_register(State(app_state.clone()), JsonExtractor(global_request)).await;
+        let global_result = handle_global_register(State(app_state.clone()), HeaderMap::new(), JsonExtractor(global_request)).await;
         assert!(global_result.is_ok());
         let global_response = global_result.unwrap();
         let global_client_id = global_response.client_id.clone();
@@ -2360,7 +2508,7 @@ mod tests {
         // Verify client is registered in the game and has cards
         let game = app_state.game_registry.get_game(&game_id).unwrap().unwrap();
         assert!(game.contains_client(&global_client_id));
-        
+
         // Check that cards were assigned during game registration
         if let Ok(manager) = game.card_manager().lock() {
             let client_cards = manager.get_client_cards(&global_client_id);
@@ -2372,11 +2520,11 @@ mod tests {
     #[tokio::test]
     async fn test_handle_extract_game_specific_client_types() {
         let app_state = create_test_app_state();
-        
+
         // Create two games via API
         let game1_id = create_test_game(&app_state).await;
         let game2_id = create_test_game(&app_state).await;
-        
+
         // Register TestPlayer as "player" in game1
         let player_request = RegisterRequest {
             name: "TestPlayer".to_string(),
@@ -2384,7 +2532,7 @@ mod tests {
             nocard: Some(1),
             email: None,
         };
-        
+
         let game1_register_result = handle_join(
             Path(game1_id.clone()),
             State(app_state.clone()),
@@ -2392,7 +2540,7 @@ mod tests {
         ).await;
         assert!(game1_register_result.is_ok());
         let client_id = game1_register_result.unwrap().0.client_id;
-        
+
         // Register same TestPlayer as "board" in game2
         let board_request = RegisterRequest {
             name: "TestPlayer".to_string(),
@@ -2400,7 +2548,7 @@ mod tests {
             nocard: Some(1),
             email: None,
         };
-        
+
         let game2_register_result = handle_join(
             Path(game2_id.clone()),
             State(app_state.clone()),
@@ -2408,11 +2556,11 @@ mod tests {
         ).await;
         assert!(game2_register_result.is_ok());
         assert_eq!(game2_register_result.unwrap().0.client_id, client_id); // Same client ID
-        
+
         // Test extraction authorization
         let mut headers = HeaderMap::new();
         headers.insert("X-Client-ID", client_id.parse().unwrap());
-        
+
         // TestPlayer should NOT be able to extract from game1 (where they are "player")
         let game1_extract_result = handle_extract(
             State(app_state.clone()),
@@ -2424,7 +2572,7 @@ mod tests {
         let error = game1_extract_result.unwrap_err();
         assert_eq!(error.status, StatusCode::FORBIDDEN);
         assert!(error.message.contains("Unauthorized: Only board clients can extract numbers"));
-        
+
         // TestPlayer SHOULD be able to extract from game2 (where they are "board")
         let game2_extract_result = handle_extract(
             State(app_state.clone()),
@@ -2441,11 +2589,11 @@ mod tests {
     #[tokio::test]
     async fn test_handle_dumpgame_game_specific_client_types() {
         let app_state = create_test_app_state();
-        
+
         // Create two games via API
         let game1_id = create_test_game(&app_state).await;
         let game2_id = create_test_game(&app_state).await;
-        
+
         // Register TestPlayer as "player" in game1 and "board" in game2
         let player_request = RegisterRequest {
             name: "TestPlayer".to_string(),
@@ -2453,7 +2601,7 @@ mod tests {
             nocard: Some(1),
             email: None,
         };
-        
+
         let game1_register_result = handle_join(
             Path(game1_id.clone()),
             State(app_state.clone()),
@@ -2461,25 +2609,25 @@ mod tests {
         ).await;
         assert!(game1_register_result.is_ok());
         let client_id = game1_register_result.unwrap().0.client_id;
-        
+
         let board_request = RegisterRequest {
             name: "TestPlayer".to_string(),
             client_type: "board".to_string(),
             nocard: Some(1),
             email: None,
         };
-        
+
         let game2_register_result = handle_join(
             Path(game2_id.clone()),
             State(app_state.clone()),
             JsonExtractor(board_request)
         ).await;
         assert!(game2_register_result.is_ok());
-        
+
         // Test dumpgame authorization
         let mut headers = HeaderMap::new();
         headers.insert("X-Client-ID", client_id.parse().unwrap());
-        
+
         // TestPlayer should NOT be able to dump game1 (where they are "player")
         let game1_dump_result = handle_dumpgame(
             State(app_state.clone()),
@@ -2490,7 +2638,7 @@ mod tests {
         let error = game1_dump_result.unwrap_err();
         assert_eq!(error.status, StatusCode::FORBIDDEN);
         assert!(error.message.contains("Unauthorized: Only board clients can dump the game"));
-        
+
         // TestPlayer SHOULD be able to dump game2 (where they are "board")
         let game2_dump_result = handle_dumpgame(
             State(app_state.clone()),
