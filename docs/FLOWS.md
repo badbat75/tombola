@@ -117,6 +117,7 @@ sequenceDiagram
     Note over S: - New Game struct with unique ID
     Note over S: - Fresh Board, Pouch, ScoreCard
     Note over S: - Empty client registrations
+    Note over S: - Owner set to board client ID
     Note over S: - New timestamp
 
     BC->>S: GET /{new_game_id}/status
@@ -262,6 +263,7 @@ sequenceDiagram
     Note over S: - New Game struct with unique ID
     Note over S: - Fresh Board, Pouch, ScoreCard cleared
     Note over S: - Empty ClientRegistry and CardAssignments
+    Note over S: - Owner set to board client ID
     Note over S: - New creation timestamp
     Note over S: - Existing games remain untouched
 

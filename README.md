@@ -42,6 +42,7 @@ The server now supports multiple concurrent games through a **GameRegistry** sys
   - Axum-based HTTP API with game-specific routing (`/{game_id}/endpoint`)
   - Multi-game support with GameRegistry for concurrent games
   - Game management endpoints (`/newgame`, `/gameslist`, `/{game_id}/dumpgame`)
+  - Game ownership tracking with owner information for each game
   - Unified Game state management with unique IDs and timestamps
   - Thread-safe shared state management with Arc<Mutex<T>>
   - Card generation with anti-adjacency patterns

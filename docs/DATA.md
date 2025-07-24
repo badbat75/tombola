@@ -8,7 +8,7 @@ This document represents the data model of the Tombola application and the relat
 graph LR
     AppState["AppState (struct)"] --> GCR["ClientRegistry (struct)"]
     AppState --> GameReg["GameRegistry (struct)"]
-    
+
     GCR --> ClientsArc["clients (Arc&lt;Mutex&lt;HashMap&gt;&gt;)"]
     ClientsArc --> CI["ClientInfo (struct)"]
     CI --> Name["name (String)"]
@@ -16,57 +16,58 @@ graph LR
     CI --> Type["client_type (String)"]
     CI --> TS["registered_at (SystemTime)"]
     CI --> Email["email (String)"]
-    
+
     GameReg --> GameMap["games (Arc&lt;Mutex&lt;HashMap&gt;&gt;)"]
     GameMap --> GameEntry["GameEntry (struct)"]
     GameEntry --> Game["Game (Arc&lt;Game&gt;)"]
-    
+
     Game --> GameID["id (Arc&lt;Mutex&lt;String&gt;&gt;)"]
     Game --> CreatedAt["created_at (Arc&lt;Mutex&lt;SystemTime&gt;&gt;)"]
+    Game --> Owner["owner (Arc&lt;Mutex&lt;Option&lt;String&gt;&gt;)"]
     Game --> RC["registered_clients (Arc&lt;Mutex&lt;HashSet&lt;String&gt;&gt;)"]
     Game --> Board["Board (Arc&lt;Mutex&lt;Board&gt;)"]
     Game --> Pouch["Pouch (Arc&lt;Mutex&lt;Pouch&gt;)"]
     Game --> ScoreCard["ScoreCard (Arc&lt;Mutex&lt;ScoreCard&gt;)"]
     Game --> CardMgr["CardAssignmentManager (Arc&lt;Mutex&gt;)"]
     Game --> GCTR["GameClientTypeRegistry (struct)"]
-    
+
     Game -.-> GCR
     Game -.-> ClientRef["get_client_info()"]
     Game -.-> ClientInfos["get_registered_client_infos()"]
-    
+
     GCTR --> ClientTypes["client_types (Arc&lt;Mutex&lt;HashMap&gt;&gt;)"]
     ClientTypes --> GameClientType["GameClientType (struct)"]
     GameClientType --> GCTClientID["client_id (String) → ClientInfo.id"]
     GameClientType --> GCTType["client_type (String)"]
-    
+
     RC --> ClientIDs["Client IDs (String)"]
-    
+
     Board --> Numbers["numbers (Vec&lt;Number&gt;)"]
     Board --> MarkedNums["marked_numbers (HashSet&lt;Number&gt;)"]
-    
+
     CardMgr --> Assignments["assignments (HashMap&lt;String, CardAssignment&gt;)"]
     CardMgr --> ClientCards["client_cards (HashMap&lt;String, Vec&lt;String&gt;&gt;)"]
-    
+
     Assignments --> CardAssign["CardAssignment (struct)"]
     CardAssign --> CardID["card_id (String)"]
     CardAssign --> ClientID["client_id (String) → ClientInfo.id"]
-    
+
     Pouch --> PouchNums["numbers (Vec&lt;Number&gt;)"]
-    
+
     ScoreCard --> Score["published_score (Number)"]
     ScoreCard --> ScoreMap["score_map (HashMap&lt;String, Vec&lt;ScoreEntry&gt;&gt;)"]
-    
+
     ScoreMap --> ScoreEntry["ScoreAchievement (struct)"]
     ScoreEntry --> SCClientID["client_id (String) → ClientInfo.id"]
     ScoreEntry --> SCCardID["card_id (String) → CardAssignment.card_id"]
     ScoreEntry --> SCNumbers["numbers (Vec&lt;Number&gt;)"]
-    
+
     classDef struct fill:#e1f5fe
     classDef wrapper fill:#f3e5f5
     classDef field fill:#e8f5e8
     classDef collection fill:#fff3e0
     classDef method fill:#f1f8e9
-    
+
     class AppState,Game,GameEntry,ClientInfo,Board,Pouch,ScoreCard,CardAssignmentManager,CardAssignment,ClientRegistry,GameRegistry,GameClientTypeRegistry,GameClientType struct
     class ClientsArc,GameMap,CardMgr,ClientTypes wrapper
     class Name,ID,Type,TS,Email,GameID,CreatedAt,Numbers,MarkedNums,PouchNums,Score,CardID,ClientID,SCClientID,SCCardID,SCNumbers,GCTClientID,GCTType field
@@ -86,13 +87,14 @@ graph LR
    - Provides clean public API methods that handle locking internally
 
 3. **ClientRegistry** manages all client information globally using the **encapsulated Arc<Mutex> pattern**:
-   - Contains **clients: Arc<Mutex<HashMap<String, ClientInfo>>>** with internal thread safety  
+   - Contains **clients: Arc<Mutex<HashMap<String, ClientInfo>>>** with internal thread safety
    - Stores **ClientInfo (struct)** objects with name, ID, client type, email, and timestamp
    - Provides clean public API methods (`get_by_name()`, `insert()`, etc.) that handle locking internally
    - Centralizes client validation and lookup across all games with proper error handling
    - **Email field is stored internally but not exposed through API responses**
 
 4. **Game (struct)** instances maintain their own isolated state:
+   - **owner**: Arc<Mutex<Option<String>>> storing the ClientID of the game creator
    - **registered_clients**: Arc<Mutex<HashSet<String>>> tracking registered client IDs
    - **client_type_registry**: GameClientTypeRegistry managing game-specific client types
    - **Board**: Arc<Mutex<Board>> containing extracted numbers and marked numbers
@@ -139,6 +141,7 @@ The game dump functionality serializes the complete game state to JSON files in 
 {
   "id": "game_xxxxxxxx",
   "created_at": { "secs_since_epoch": 1753262774, "nanos_since_epoch": 664070800 },
+  "owner": "BOARD_CLIENT_ID",
   "board": {
     "numbers": [67, 59, 31, 24, ...],
     "marked_numbers": []

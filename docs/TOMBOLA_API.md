@@ -141,14 +141,16 @@ List all available games with their current status and statistics.
       "status": "New",
       "created_at": "2025-07-22 08:51:49 UTC",
       "client_count": 0,
-      "extracted_numbers": 0
+      "extracted_numbers": 0,
+      "owner": "BOARD_CLIENT_ID"
     },
     {
       "game_id": "game_87654321",
       "status": "Active",
       "created_at": "2025-07-22 08:45:12 UTC",
       "client_count": 3,
-      "extracted_numbers": 15
+      "extracted_numbers": 15,
+      "owner": "ANOTHER_BOARD_ID"
     }
   ]
 }
@@ -158,6 +160,7 @@ List all available games with their current status and statistics.
 - Used by smart clients for automatic game discovery
 - Shows all games regardless of their state
 - Includes game statistics for informed decision making
+- `owner` field shows the ClientID of the board client that created each game
 
 ### 2. Global Client Registration
 
@@ -526,6 +529,7 @@ Get overall server status and specific game information.
   "status": "new",
   "game_id": "game_12345678",
   "created_at": "2025-07-17 14:30:25 UTC",
+  "owner": "BOARD_CLIENT_ID",
   "players": "4",
   "cards": "20",
   "numbers_extracted": 8,
@@ -540,6 +544,7 @@ Get overall server status and specific game information.
   "game_id": "game_12345678",
   "created_at": "2025-07-17 14:30:25 UTC",
   "closed_at": "2025-07-17 15:45:10 UTC",
+  "owner": "BOARD_CLIENT_ID",
   "players": "4",
   "cards": "20",
   "numbers_extracted": 45,
@@ -554,6 +559,7 @@ Get overall server status and specific game information.
   - `closed`: BINGO has been reached (scorecard = 15)
 - `game_id`: Unique 8-digit hexadecimal identifier for the specific game
 - `created_at`: Human-readable timestamp when this specific game was created
+- `owner`: Client ID of the board client that created this game
 - `closed_at`: Human-readable timestamp when the game was closed (only present if status is "closed")
 - `players`: Number of registered players in this game (as string)
 - `cards`: Total number of cards assigned in this game (as string)

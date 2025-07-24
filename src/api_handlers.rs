@@ -157,7 +157,18 @@ pub async fn handle_join(
 
     // Generate the requested number of cards using the card manager
     if let Ok(mut manager) = game.card_manager().lock() {
-        manager.assign_cards_with_type(&client_id, card_count, Some(client_type));
+        // Check if there's already a board owner (client with BOARD_ID card)
+        let has_board_owner = manager.get_card_assignment(BOARD_ID).is_some();
+
+        // If client_type is "board" but there's already a board owner, treat them as a regular player
+        let effective_client_type = if client_type == "board" && has_board_owner {
+            log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Board owner already exists, treating board client as regular player"));
+            "player"
+        } else {
+            client_type
+        };
+
+        manager.assign_cards_with_type(&client_id, card_count, Some(effective_client_type));
         log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Generated and assigned {card_count} cards in game '{game_id}'"));
     } else {
         log(LogLevel::Warning, MODULE_NAME, &format!("[Client: {client_id}] Failed to acquire card manager lock in game '{game_id}'"));
@@ -647,11 +658,13 @@ pub async fn handle_status(
     let scorecard = game.published_score();
     let player_count = game.player_count();
     let card_count = game.card_count();
+    let owner = game.owner();
 
     let mut response = json!({
         "status": status.as_str().to_lowercase(),
         "game_id": game.id(),
         "created_at": game.created_at_string(),
+        "owner": owner,
         "players": player_count.to_string(),
         "cards": card_count.to_string(),
         "numbers_extracted": board_len,
@@ -695,18 +708,21 @@ pub async fn handle_extract(
         return Err(ApiError::new(StatusCode::FORBIDDEN, "Client must be registered to this game"));
     }
 
-    // Only allow board client type to extract numbers - check game-specific client type
-    match game.is_client_type(&client_id, "board") {
-        Ok(is_board) => {
-            if !is_board {
-                log(LogLevel::Error, MODULE_NAME, &format!("Unauthorized: Only board clients can extract numbers, client ID: {client_id}"));
-                return Err(ApiError::new(StatusCode::FORBIDDEN, "Unauthorized: Only board clients can extract numbers"));
-            }
+    // Only allow the board owner (client with BOARD_ID card assigned) to extract numbers
+    let is_board_owner = if let Ok(manager) = game.card_manager().lock() {
+        if let Some(client_cards) = manager.get_client_cards(&client_id) {
+            client_cards.contains(&BOARD_ID.to_string())
+        } else {
+            false
         }
-        Err(e) => {
-            log(LogLevel::Error, MODULE_NAME, &format!("Failed to check client type for '{client_id}' in game '{game_id}': {e}"));
-            return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to verify client authorization"));
-        }
+    } else {
+        log(LogLevel::Error, MODULE_NAME, &format!("Failed to acquire card manager lock for client {client_id}"));
+        return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to verify board ownership"));
+    };
+
+    if !is_board_owner {
+        log(LogLevel::Error, MODULE_NAME, &format!("Unauthorized: Only the board owner can extract numbers, client ID: {client_id}"));
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "Unauthorized: Only the board owner can extract numbers"));
     }
 
     // Check if BINGO has been reached - if so, no more extractions allowed
@@ -770,10 +786,19 @@ pub async fn handle_global_newgame(
 
     log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] New game request"));
 
-    // Only allow board client (ID: "0000000000000000") to create a new game
-    if client_id != BOARD_ID {
-        log(LogLevel::Error, MODULE_NAME, &format!("[Client: {client_id}] Unauthorized: Only board client can create a new game"));
-        return Err(ApiError::new(StatusCode::FORBIDDEN, "Unauthorized: Only board client can create a new game"));
+    // Verify client exists in global registry (any authenticated client can create a game)
+    match app_state.global_client_registry.get_by_client_id(&client_id) {
+        Ok(Some(_client_info)) => {
+            // Client exists, they can create a game
+        }
+        Ok(None) => {
+            log(LogLevel::Error, MODULE_NAME, &format!("[Client: {client_id}] Client not found in global registry"));
+            return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Client not registered"));
+        }
+        Err(e) => {
+            log(LogLevel::Error, MODULE_NAME, &format!("[Client: {client_id}] Failed to verify client: {e}"));
+            return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to verify client"));
+        }
     }
 
     // Create a completely new game
@@ -781,11 +806,17 @@ pub async fn handle_global_newgame(
     let new_game_id = new_game.id();
     let new_game_created_at = new_game.created_at_string();
 
+    // Set the game owner to the client who created it
+    if let Err(e) = new_game.set_owner(&client_id) {
+        log(LogLevel::Error, MODULE_NAME, &format!("[Client: {client_id}] Failed to set game owner: {e}"));
+        return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to set game owner"));
+    }
+
     log(LogLevel::Info, MODULE_NAME, &format!("Created new game: {}", new_game.game_info()));
 
     // Add the new game to the registry
     let new_game_arc = Arc::new(new_game.clone());
-    match app_state.game_registry.add_game(new_game_arc) {
+    match app_state.game_registry.add_game(new_game_arc.clone()) {
         Ok(registered_id) => {
             log(LogLevel::Info, MODULE_NAME, &format!("Registered new game in registry: {registered_id}"));
         }
@@ -795,6 +826,33 @@ pub async fn handle_global_newgame(
         }
     }
 
+    // Register the game creator as the board owner by joining them to the game and assigning BOARD_ID card
+    match new_game_arc.add_client(client_id.clone()) {
+        Ok(_) => {
+            log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Added as board owner to game {new_game_id}"));
+        }
+        Err(e) => {
+            log(LogLevel::Error, MODULE_NAME, &format!("[Client: {client_id}] Failed to add as board owner: {e}"));
+            return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to register game creator as board owner: {e}")));
+        }
+    }
+
+    // Set the client type as board for this game
+    if let Err(e) = new_game_arc.set_client_type(&client_id, "board") {
+        log(LogLevel::Error, MODULE_NAME, &format!("[Client: {client_id}] Failed to set client type as board: {e}"));
+        return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to set client type"));
+    }
+
+    // Assign the special BOARD_ID card to make them the board owner
+    if let Ok(mut manager) = new_game_arc.card_manager().lock() {
+        // Assign the special board card (BOARD_ID) to the game creator
+        manager.assign_cards_with_type(&client_id, 1, Some("board"));
+        log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] Assigned BOARD_ID card as game owner"));
+    } else {
+        log(LogLevel::Error, MODULE_NAME, &format!("[Client: {client_id}] Failed to assign BOARD_ID card"));
+        return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to assign board ownership"));
+    }
+
     // Note: The new game is created and registered in the registry, but the current AppState.game
     // still points to the old game. In a future implementation, we could enhance this to
     // switch the active game, but for now this creates a new game that can be accessed via
@@ -802,9 +860,10 @@ pub async fn handle_global_newgame(
 
     Ok(Json(json!({
         "success": true,
-        "message": "New game created successfully",
+        "message": "New game created successfully. You are now the board owner.",
         "game_id": new_game_id,
         "created_at": new_game_created_at,
+        "board_owner": client_id,
         "note": "New game created and registered. Access it via /gameslist endpoint."
     })))
 }
@@ -829,18 +888,21 @@ pub async fn handle_dumpgame(
 
     let game = get_game_from_registry(&app_state, &game_id).await?;
 
-    // Only allow board client type to dump the game - check game-specific client type
-    match game.is_client_type(client_id, "board") {
-        Ok(is_board) => {
-            if !is_board {
-                log(LogLevel::Error, MODULE_NAME, &format!("Unauthorized: Only board clients can dump the game, client ID: {client_id}"));
-                return Err(ApiError::new(StatusCode::FORBIDDEN, "Unauthorized: Only board clients can dump the game"));
-            }
+    // Only allow the board owner (client with BOARD_ID card assigned) to dump the game
+    let is_board_owner = if let Ok(manager) = game.card_manager().lock() {
+        if let Some(client_cards) = manager.get_client_cards(client_id) {
+            client_cards.contains(&BOARD_ID.to_string())
+        } else {
+            false
         }
-        Err(e) => {
-            log(LogLevel::Error, MODULE_NAME, &format!("Failed to check client type for '{client_id}' in game '{game_id}': {e}"));
-            return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to verify client authorization"));
-        }
+    } else {
+        log(LogLevel::Error, MODULE_NAME, &format!("Failed to acquire card manager lock for client {client_id}"));
+        return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to verify board ownership"));
+    };
+
+    if !is_board_owner {
+        log(LogLevel::Error, MODULE_NAME, &format!("Unauthorized: Only the board owner can dump the game, client ID: {client_id}"));
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "Unauthorized: Only the board owner can dump the game"));
     }
 
     // Dump the game state to JSON
@@ -925,7 +987,8 @@ pub async fn handle_global_gameslist(
                         "game_id": game_id,
                         "status": status.as_str(),
                         "start_date": game.created_at_string(),
-                        "close_date": closed_at
+                        "close_date": closed_at,
+                        "owner": game.owner()
                     }));
                 }
             }
@@ -981,6 +1044,18 @@ mod tests {
 
     // Helper function to create a test game via API and return its ID
     async fn create_test_game(app_state: &Arc<AppState>) -> String {
+        // First, ensure the BOARD_ID client is registered globally
+        let board_client_info = crate::client::ClientInfo {
+            id: BOARD_ID.to_string(),
+            name: "Board".to_string(),
+            client_type: "board".to_string(),
+            registered_at: std::time::SystemTime::now(),
+            email: String::new(),
+        };
+
+        // Add to global registry (this will not overwrite if already exists)
+        let _ = app_state.global_client_registry.insert(board_client_info);
+
         // Use the board client to create a new game via API
         let mut board_headers = HeaderMap::new();
         board_headers.insert("X-Client-ID", BOARD_ID.parse().unwrap());
@@ -990,8 +1065,8 @@ mod tests {
             Ok(response) => {
                 let game_id = response["game_id"].as_str().unwrap().to_string();
 
-                // Register BOARD_ID as a board client for this new game using API
-                register_board_client_to_game(app_state, &game_id).await;
+                // The board client is automatically registered and assigned BOARD_ID card in newgame
+                // No need to call register_board_client_to_game anymore
 
                 game_id
             }
@@ -1562,9 +1637,52 @@ mod tests {
         assert_eq!(response.0["status"], "new");  // New game should have "new" status
         assert!(response.0["game_id"].is_string());
         assert!(response.0["created_at"].is_string());
+        assert_eq!(response.0["owner"], BOARD_ID);  // Test game is created by BOARD_ID client
         assert_eq!(response.0["numbers_extracted"], 0);
         assert_eq!(response.0["scorecard"], 0);
         // Note: server field was removed from new implementation, so don't check it
+    }
+
+    #[tokio::test]
+    async fn test_game_owner_in_status_endpoint() {
+        let app_state = create_test_app_state();
+
+        // Create a test client
+        let test_client_id = "test_owner_client_123";
+        let test_client_info = crate::client::ClientInfo {
+            id: test_client_id.to_string(),
+            name: "Test Owner".to_string(),
+            client_type: "player".to_string(),
+            registered_at: std::time::SystemTime::now(),
+            email: "test@example.com".to_string(),
+        };
+        app_state.global_client_registry.insert(test_client_info).unwrap();
+
+        // Create a new game with this client
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Client-ID", test_client_id.parse().unwrap());
+
+        let newgame_result = handle_global_newgame(State(app_state.clone()), headers.clone()).await;
+        assert!(newgame_result.is_ok());
+
+        let newgame_response = newgame_result.unwrap();
+        let game_id = newgame_response["game_id"].as_str().unwrap().to_string();
+
+        // Check the status endpoint to verify owner is returned
+        let status_result = handle_status(
+            State(app_state.clone()),
+            Path(game_id.clone()),
+            HeaderMap::new(),
+            Query(ClientIdQuery { client_id: None }),
+        ).await;
+
+        assert!(status_result.is_ok());
+        let status_response = status_result.unwrap();
+
+        // Verify the owner field contains the correct client ID
+        assert_eq!(status_response.0["owner"], test_client_id);
+        assert_eq!(status_response.0["game_id"], game_id);
+        assert_eq!(status_response.0["status"], "new");
     }
 
     #[tokio::test]
@@ -1612,7 +1730,7 @@ mod tests {
         assert!(result.is_err());
         let error = result.unwrap_err();
         assert_eq!(error.status, StatusCode::FORBIDDEN);
-        assert!(error.message.contains("Unauthorized: Only board clients can extract numbers"));
+        assert!(error.message.contains("Unauthorized: Only the board owner can extract numbers"));
     }
 
     #[tokio::test]
@@ -1639,9 +1757,6 @@ mod tests {
         let app_state = create_test_app_state();
         let game_id = get_test_game_id(&app_state).await;
 
-        // Register BOARD_ID as a board client for the original game using API
-        register_board_client_to_game(&app_state, &game_id).await;
-
         let mut headers = HeaderMap::new();
         headers.insert("X-Client-ID", BOARD_ID.parse().unwrap()); // Board client
 
@@ -1663,10 +1778,11 @@ mod tests {
         assert!(result.is_ok());
         let response = result.unwrap();
         assert_eq!(response["success"], true);
-        assert_eq!(response["message"], "New game created successfully");
+        assert_eq!(response["message"], "New game created successfully. You are now the board owner.");
         assert!(response["game_id"].is_string());
         assert!(response["created_at"].is_string());
         assert!(response["note"].is_string());
+        assert_eq!(response["board_owner"], BOARD_ID);
 
         // Verify a new game was added to the registry
         let final_count = app_state.game_registry.total_games().unwrap();
@@ -1676,17 +1792,16 @@ mod tests {
     #[tokio::test]
     async fn test_handle_newgame_unauthorized() {
         let app_state = create_test_app_state();
-        let client_id = register_test_client(&app_state, "newgame_test_player").await;
 
-        let mut headers = HeaderMap::new();
-        headers.insert("X-Client-ID", client_id.parse().unwrap()); // Regular client, not board
+        // Test without any client ID header (unauthenticated)
+        let headers = HeaderMap::new(); // No X-Client-ID header
 
         let result = handle_global_newgame(State(app_state.clone()), headers).await;
 
         assert!(result.is_err());
         let error = result.unwrap_err();
-        assert_eq!(error.status, StatusCode::FORBIDDEN);
-        assert!(error.message.contains("Unauthorized: Only board client can create a new game"));
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert!(error.message.contains("Client ID header (X-Client-ID) is required"));
     }
 
     #[tokio::test]
@@ -1736,7 +1851,7 @@ mod tests {
         assert!(result.is_err());
         let error = result.unwrap_err();
         assert_eq!(error.status, StatusCode::FORBIDDEN);
-        assert!(error.message.contains("Unauthorized: Only board clients can dump the game"));
+        assert!(error.message.contains("Unauthorized: Only the board owner can dump the game"));
     }
 
     #[tokio::test]
@@ -2166,9 +2281,25 @@ mod tests {
 
         let app_state = create_test_app_state();
 
-        // Step 1: Create two new games
+        // Step 1: Register BOARD_ID client globally first
+        let board_register_request = RegisterRequest {
+            name: "BoardOwner".to_string(),
+            client_type: "board".to_string(),
+            nocard: None,
+            email: None,
+        };
+
+        let board_register_result = handle_global_register(
+            State(app_state.clone()),
+            HeaderMap::new(),
+            JsonExtractor(board_register_request)
+        ).await;
+        assert!(board_register_result.is_ok(), "Failed to register board client globally");
+        let board_client_id = board_register_result.unwrap().client_id.clone();
+
+        // Step 2: Create two new games
         let mut board_headers = HeaderMap::new();
-        board_headers.insert("X-Client-ID", BOARD_ID.parse().unwrap());
+        board_headers.insert("X-Client-ID", board_client_id.parse().unwrap());
 
         // Create first new game
         let newgame1_result = handle_global_newgame(State(app_state.clone()), board_headers.clone()).await;
@@ -2521,13 +2652,38 @@ mod tests {
     async fn test_handle_extract_game_specific_client_types() {
         let app_state = create_test_app_state();
 
-        // Create two games via API
-        let game1_id = create_test_game(&app_state).await;
-        let game2_id = create_test_game(&app_state).await;
-
-        // Register TestPlayer as "player" in game1
-        let player_request = RegisterRequest {
+        // First register a TestPlayer globally
+        let player_register_request = RegisterRequest {
             name: "TestPlayer".to_string(),
+            client_type: "player".to_string(),
+            nocard: None,
+            email: None,
+        };
+
+        let global_register_result = handle_global_register(
+            State(app_state.clone()),
+            HeaderMap::new(),
+            JsonExtractor(player_register_request)
+        ).await;
+        assert!(global_register_result.is_ok());
+        let client_id = global_register_result.unwrap().client_id.clone();
+
+        // Create game1 using TestPlayer (they become board owner)
+        let mut client_headers = HeaderMap::new();
+        client_headers.insert("X-Client-ID", client_id.parse().unwrap());
+
+        let game1_result = handle_global_newgame(State(app_state.clone()), client_headers.clone()).await;
+        assert!(game1_result.is_ok());
+        let game1_id = game1_result.unwrap()["game_id"].as_str().unwrap().to_string();
+
+        // Create game2 using TestPlayer (they become board owner)
+        let game2_result = handle_global_newgame(State(app_state.clone()), client_headers.clone()).await;
+        assert!(game2_result.is_ok());
+        let game2_id = game2_result.unwrap()["game_id"].as_str().unwrap().to_string();
+
+        // Register a different client as player in game1
+        let other_player_request = RegisterRequest {
+            name: "OtherPlayer".to_string(),
             client_type: "player".to_string(),
             nocard: Some(1),
             email: None,
@@ -2536,48 +2692,32 @@ mod tests {
         let game1_register_result = handle_join(
             Path(game1_id.clone()),
             State(app_state.clone()),
-            JsonExtractor(player_request.clone())
+            JsonExtractor(other_player_request)
         ).await;
         assert!(game1_register_result.is_ok());
-        let client_id = game1_register_result.unwrap().0.client_id;
-
-        // Register same TestPlayer as "board" in game2
-        let board_request = RegisterRequest {
-            name: "TestPlayer".to_string(),
-            client_type: "board".to_string(),
-            nocard: Some(1),
-            email: None,
-        };
-
-        let game2_register_result = handle_join(
-            Path(game2_id.clone()),
-            State(app_state.clone()),
-            JsonExtractor(board_request)
-        ).await;
-        assert!(game2_register_result.is_ok());
-        assert_eq!(game2_register_result.unwrap().0.client_id, client_id); // Same client ID
+        let other_client_id = game1_register_result.unwrap().0.client_id;
 
         // Test extraction authorization
-        let mut headers = HeaderMap::new();
-        headers.insert("X-Client-ID", client_id.parse().unwrap());
+        let mut other_headers = HeaderMap::new();
+        other_headers.insert("X-Client-ID", other_client_id.parse().unwrap());
 
-        // TestPlayer should NOT be able to extract from game1 (where they are "player")
+        // OtherPlayer should NOT be able to extract from game1 (where TestPlayer is board owner)
         let game1_extract_result = handle_extract(
             State(app_state.clone()),
             Path(game1_id),
-            headers.clone(),
+            other_headers,
             Query(ClientIdQuery { client_id: None }),
         ).await;
         assert!(game1_extract_result.is_err());
         let error = game1_extract_result.unwrap_err();
         assert_eq!(error.status, StatusCode::FORBIDDEN);
-        assert!(error.message.contains("Unauthorized: Only board clients can extract numbers"));
+        assert!(error.message.contains("Unauthorized: Only the board owner can extract numbers"));
 
-        // TestPlayer SHOULD be able to extract from game2 (where they are "board")
+        // TestPlayer SHOULD be able to extract from game2 (where they are the board owner)
         let game2_extract_result = handle_extract(
             State(app_state.clone()),
             Path(game2_id),
-            headers,
+            client_headers,
             Query(ClientIdQuery { client_id: None }),
         ).await;
         assert!(game2_extract_result.is_ok());
@@ -2590,13 +2730,38 @@ mod tests {
     async fn test_handle_dumpgame_game_specific_client_types() {
         let app_state = create_test_app_state();
 
-        // Create two games via API
-        let game1_id = create_test_game(&app_state).await;
-        let game2_id = create_test_game(&app_state).await;
-
-        // Register TestPlayer as "player" in game1 and "board" in game2
-        let player_request = RegisterRequest {
+        // First register a TestPlayer globally
+        let player_register_request = RegisterRequest {
             name: "TestPlayer".to_string(),
+            client_type: "player".to_string(),
+            nocard: None,
+            email: None,
+        };
+
+        let global_register_result = handle_global_register(
+            State(app_state.clone()),
+            HeaderMap::new(),
+            JsonExtractor(player_register_request)
+        ).await;
+        assert!(global_register_result.is_ok());
+        let client_id = global_register_result.unwrap().client_id.clone();
+
+        // Create game1 using TestPlayer (they become board owner)
+        let mut client_headers = HeaderMap::new();
+        client_headers.insert("X-Client-ID", client_id.parse().unwrap());
+
+        let game1_result = handle_global_newgame(State(app_state.clone()), client_headers.clone()).await;
+        assert!(game1_result.is_ok());
+        let game1_id = game1_result.unwrap()["game_id"].as_str().unwrap().to_string();
+
+        // Create game2 using TestPlayer (they become board owner)
+        let game2_result = handle_global_newgame(State(app_state.clone()), client_headers.clone()).await;
+        assert!(game2_result.is_ok());
+        let game2_id = game2_result.unwrap()["game_id"].as_str().unwrap().to_string();
+
+        // Register a different client as player in game1
+        let other_player_request = RegisterRequest {
+            name: "OtherPlayer".to_string(),
             client_type: "player".to_string(),
             nocard: Some(1),
             email: None,
@@ -2605,48 +2770,403 @@ mod tests {
         let game1_register_result = handle_join(
             Path(game1_id.clone()),
             State(app_state.clone()),
-            JsonExtractor(player_request)
+            JsonExtractor(other_player_request)
         ).await;
         assert!(game1_register_result.is_ok());
-        let client_id = game1_register_result.unwrap().0.client_id;
-
-        let board_request = RegisterRequest {
-            name: "TestPlayer".to_string(),
-            client_type: "board".to_string(),
-            nocard: Some(1),
-            email: None,
-        };
-
-        let game2_register_result = handle_join(
-            Path(game2_id.clone()),
-            State(app_state.clone()),
-            JsonExtractor(board_request)
-        ).await;
-        assert!(game2_register_result.is_ok());
+        let other_client_id = game1_register_result.unwrap().0.client_id;
 
         // Test dumpgame authorization
-        let mut headers = HeaderMap::new();
-        headers.insert("X-Client-ID", client_id.parse().unwrap());
+        let mut other_headers = HeaderMap::new();
+        other_headers.insert("X-Client-ID", other_client_id.parse().unwrap());
 
-        // TestPlayer should NOT be able to dump game1 (where they are "player")
+        // OtherPlayer should NOT be able to dump game1 (where TestPlayer is board owner)
         let game1_dump_result = handle_dumpgame(
             State(app_state.clone()),
             Path(game1_id),
-            headers.clone(),
+            other_headers,
         ).await;
         assert!(game1_dump_result.is_err());
         let error = game1_dump_result.unwrap_err();
         assert_eq!(error.status, StatusCode::FORBIDDEN);
-        assert!(error.message.contains("Unauthorized: Only board clients can dump the game"));
+        assert!(error.message.contains("Unauthorized: Only the board owner can dump the game"));
 
-        // TestPlayer SHOULD be able to dump game2 (where they are "board")
+        // TestPlayer SHOULD be able to dump game2 (where they are the board owner)
         let game2_dump_result = handle_dumpgame(
             State(app_state.clone()),
             Path(game2_id),
-            headers,
+            client_headers,
         ).await;
         assert!(game2_dump_result.is_ok());
         let response = game2_dump_result.unwrap();
         assert_eq!(response.0["success"], true);
+    }
+
+    #[tokio::test]
+    async fn test_end_to_end_user_creates_game_becomes_board_owner() {
+        let app_state = create_test_app_state();
+
+        // Step 1: Register a regular user globally
+        let register_request = RegisterRequest {
+            name: "game_creator".to_string(),
+            client_type: "player".to_string(),
+            nocard: None,
+            email: Some("creator@example.com".to_string()),
+        };
+
+        let register_result = handle_global_register(
+            State(app_state.clone()),
+            HeaderMap::new(),
+            JsonExtractor(register_request),
+        ).await;
+
+        assert!(register_result.is_ok());
+        let register_response = register_result.unwrap();
+        let creator_client_id = register_response.0.client_id.clone();
+        assert!(!creator_client_id.is_empty());
+        assert!(register_response.0.message.contains("registered successfully globally"));
+
+        // Step 2: User creates a new game and becomes board owner
+        let mut creator_headers = HeaderMap::new();
+        creator_headers.insert("X-Client-ID", creator_client_id.parse().unwrap());
+
+        let newgame_result = handle_global_newgame(
+            State(app_state.clone()),
+            creator_headers.clone(),
+        ).await;
+
+        assert!(newgame_result.is_ok());
+        let newgame_response = newgame_result.unwrap();
+        let game_id = newgame_response.0["game_id"].as_str().unwrap().to_string();
+        assert_eq!(newgame_response.0["success"], true);
+        assert_eq!(newgame_response.0["board_owner"], creator_client_id);
+        assert!(newgame_response.0["message"].as_str().unwrap().contains("You are now the board owner"));
+
+        // Step 3: Verify the creator is registered to the game and has BOARD_ID card
+        let listcards_result = handle_listassignedcards(
+            State(app_state.clone()),
+            Path(game_id.clone()),
+            creator_headers.clone(),
+            Query(ClientIdQuery { client_id: None }),
+        ).await;
+
+        assert!(listcards_result.is_ok());
+        let cards_response = listcards_result.unwrap();
+        assert!(!cards_response.0.cards.is_empty());
+
+        // Check if the user has the special BOARD_ID card
+        let has_board_card = cards_response.0.cards.iter()
+            .any(|card| card.card_id == BOARD_ID);
+        assert!(has_board_card, "Creator should have BOARD_ID card assigned");
+
+        // Step 4: Board owner successfully extracts a number
+        let extract_result = handle_extract(
+            State(app_state.clone()),
+            Path(game_id.clone()),
+            creator_headers.clone(),
+            Query(ClientIdQuery { client_id: None }),
+        ).await;
+
+        assert!(extract_result.is_ok());
+        let extract_response = extract_result.unwrap();
+        assert_eq!(extract_response.0["success"], true);
+        assert!(extract_response.0["extracted_number"].is_number());
+        assert_eq!(extract_response.0["total_extracted"], 1);
+        assert_eq!(extract_response.0["numbers_remaining"], 89);
+
+        // Step 5: Register another user to the same game
+        let player2_request = RegisterRequest {
+            name: "regular_player".to_string(),
+            client_type: "player".to_string(),
+            nocard: Some(2),
+            email: None,
+        };
+
+        // First register them globally
+        let player2_global_result = handle_global_register(
+            State(app_state.clone()),
+            HeaderMap::new(),
+            JsonExtractor(player2_request.clone()),
+        ).await;
+
+        assert!(player2_global_result.is_ok());
+        let player2_client_id = player2_global_result.unwrap().0.client_id;
+
+        // Try to join the game (should fail since numbers have been extracted)
+        let player2_join_result = handle_join(
+            Path(game_id.clone()),
+            State(app_state.clone()),
+            JsonExtractor(player2_request),
+        ).await;
+
+        assert!(player2_join_result.is_err());
+        let join_error = player2_join_result.unwrap_err();
+        assert_eq!(join_error.status, StatusCode::CONFLICT);
+        assert!(join_error.message.contains("Cannot register new clients after numbers have been extracted"));
+
+        // Step 6: Create a fresh game to test regular player access
+        let fresh_game_result = handle_global_newgame(
+            State(app_state.clone()),
+            creator_headers.clone(),
+        ).await;
+
+        assert!(fresh_game_result.is_ok());
+        let fresh_game_id = fresh_game_result.unwrap().0["game_id"].as_str().unwrap().to_string();
+
+        // Join regular player to fresh game
+        let player2_fresh_request = RegisterRequest {
+            name: "regular_player".to_string(),
+            client_type: "player".to_string(),
+            nocard: Some(1),
+            email: None,
+        };
+
+        let player2_fresh_join = handle_join(
+            Path(fresh_game_id.clone()),
+            State(app_state.clone()),
+            JsonExtractor(player2_fresh_request),
+        ).await;
+
+        assert!(player2_fresh_join.is_ok());
+
+        // Step 7: Regular player cannot extract numbers
+        let mut player2_headers = HeaderMap::new();
+        player2_headers.insert("X-Client-ID", player2_client_id.parse().unwrap());
+
+        let player2_extract_result = handle_extract(
+            State(app_state.clone()),
+            Path(fresh_game_id.clone()),
+            player2_headers.clone(),
+            Query(ClientIdQuery { client_id: None }),
+        ).await;
+
+        assert!(player2_extract_result.is_err());
+        let extract_error = player2_extract_result.unwrap_err();
+        assert_eq!(extract_error.status, StatusCode::FORBIDDEN);
+        assert!(extract_error.message.contains("Only the board owner can extract numbers"));
+
+        // Step 8: Board owner can extract from fresh game
+        let creator_extract_fresh = handle_extract(
+            State(app_state.clone()),
+            Path(fresh_game_id.clone()),
+            creator_headers.clone(),
+            Query(ClientIdQuery { client_id: None }),
+        ).await;
+
+        assert!(creator_extract_fresh.is_ok());
+        let fresh_extract_response = creator_extract_fresh.unwrap();
+        assert_eq!(fresh_extract_response.0["success"], true);
+
+        // Step 9: Regular player cannot dump game
+        let player2_dump_result = handle_dumpgame(
+            State(app_state.clone()),
+            Path(fresh_game_id.clone()),
+            player2_headers,
+        ).await;
+
+        assert!(player2_dump_result.is_err());
+        let dump_error = player2_dump_result.unwrap_err();
+        assert_eq!(dump_error.status, StatusCode::FORBIDDEN);
+        assert!(dump_error.message.contains("Only the board owner can dump the game"));
+
+        // Step 10: Board owner can dump game
+        let creator_dump_result = handle_dumpgame(
+            State(app_state.clone()),
+            Path(fresh_game_id),
+            creator_headers,
+        ).await;
+
+        assert!(creator_dump_result.is_ok());
+        let dump_response = creator_dump_result.unwrap();
+        assert_eq!(dump_response.0["success"], true);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_users_create_different_games() {
+        let app_state = create_test_app_state();
+
+        // Register two different users
+        let user1_request = RegisterRequest {
+            name: "creator1".to_string(),
+            client_type: "player".to_string(),
+            nocard: None,
+            email: None,
+        };
+
+        let user2_request = RegisterRequest {
+            name: "creator2".to_string(),
+            client_type: "admin".to_string(),
+            nocard: None,
+            email: None,
+        };
+
+        let user1_result = handle_global_register(
+            State(app_state.clone()),
+            HeaderMap::new(),
+            JsonExtractor(user1_request),
+        ).await;
+        assert!(user1_result.is_ok());
+        let user1_id = user1_result.unwrap().0.client_id;
+
+        let user2_result = handle_global_register(
+            State(app_state.clone()),
+            HeaderMap::new(),
+            JsonExtractor(user2_request),
+        ).await;
+        assert!(user2_result.is_ok());
+        let user2_id = user2_result.unwrap().0.client_id;
+
+        // Each user creates their own game
+        let mut user1_headers = HeaderMap::new();
+        user1_headers.insert("X-Client-ID", user1_id.parse().unwrap());
+
+        let mut user2_headers = HeaderMap::new();
+        user2_headers.insert("X-Client-ID", user2_id.parse().unwrap());
+
+        let game1_result = handle_global_newgame(
+            State(app_state.clone()),
+            user1_headers.clone(),
+        ).await;
+        assert!(game1_result.is_ok());
+        let game1_id = game1_result.unwrap().0["game_id"].as_str().unwrap().to_string();
+
+        let game2_result = handle_global_newgame(
+            State(app_state.clone()),
+            user2_headers.clone(),
+        ).await;
+        assert!(game2_result.is_ok());
+        let game2_id = game2_result.unwrap().0["game_id"].as_str().unwrap().to_string();
+
+        // Verify games are different
+        assert_ne!(game1_id, game2_id);
+
+        // Each user can extract from their own game
+        let user1_extract = handle_extract(
+            State(app_state.clone()),
+            Path(game1_id.clone()),
+            user1_headers.clone(),
+            Query(ClientIdQuery { client_id: None }),
+        ).await;
+        assert!(user1_extract.is_ok());
+
+        let user2_extract = handle_extract(
+            State(app_state.clone()),
+            Path(game2_id.clone()),
+            user2_headers.clone(),
+            Query(ClientIdQuery { client_id: None }),
+        ).await;
+        assert!(user2_extract.is_ok());
+
+        // But users cannot extract from each other's games
+        let user1_extract_game2 = handle_extract(
+            State(app_state.clone()),
+            Path(game2_id),
+            user1_headers,
+            Query(ClientIdQuery { client_id: None }),
+        ).await;
+        assert!(user1_extract_game2.is_err());
+
+        let user2_extract_game1 = handle_extract(
+            State(app_state.clone()),
+            Path(game1_id),
+            user2_headers,
+            Query(ClientIdQuery { client_id: None }),
+        ).await;
+        assert!(user2_extract_game1.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_board_ownership_transfer_impossible() {
+        let app_state = create_test_app_state();
+
+        // Create a game with user1
+        let user1_request = RegisterRequest {
+            name: "original_owner".to_string(),
+            client_type: "player".to_string(),
+            nocard: None,
+            email: None,
+        };
+
+        let user1_result = handle_global_register(
+            State(app_state.clone()),
+            HeaderMap::new(),
+            JsonExtractor(user1_request),
+        ).await;
+        assert!(user1_result.is_ok());
+        let user1_id = user1_result.unwrap().0.client_id;
+
+        let mut user1_headers = HeaderMap::new();
+        user1_headers.insert("X-Client-ID", user1_id.parse().unwrap());
+
+        let game_result = handle_global_newgame(
+            State(app_state.clone()),
+            user1_headers.clone(),
+        ).await;
+        assert!(game_result.is_ok());
+        let game_id = game_result.unwrap().0["game_id"].as_str().unwrap().to_string();
+
+        // Register user2 to the same game
+        let user2_request = RegisterRequest {
+            name: "second_user".to_string(),
+            client_type: "board".to_string(), // Even trying to register as board
+            nocard: Some(1),
+            email: None,
+        };
+
+        let user2_global_result = handle_global_register(
+            State(app_state.clone()),
+            HeaderMap::new(),
+            JsonExtractor(user2_request.clone()),
+        ).await;
+        assert!(user2_global_result.is_ok());
+        let user2_id = user2_global_result.unwrap().0.client_id;
+
+        let user2_join_result = handle_join(
+            Path(game_id.clone()),
+            State(app_state.clone()),
+            JsonExtractor(user2_request),
+        ).await;
+        assert!(user2_join_result.is_ok());
+
+        // Verify user2 does NOT have BOARD_ID card
+        let mut user2_headers = HeaderMap::new();
+        user2_headers.insert("X-Client-ID", user2_id.parse().unwrap());
+
+        let user2_cards_result = handle_listassignedcards(
+            State(app_state.clone()),
+            Path(game_id.clone()),
+            user2_headers.clone(),
+            Query(ClientIdQuery { client_id: None }),
+        ).await;
+
+        assert!(user2_cards_result.is_ok());
+        let user2_cards = user2_cards_result.unwrap();
+        let has_board_card = user2_cards.0.cards.iter()
+            .any(|card| card.card_id == BOARD_ID);
+        assert!(!has_board_card, "Second user should NOT have BOARD_ID card");
+
+        // User2 cannot extract numbers even though they registered as "board" type
+        let user2_extract_result = handle_extract(
+            State(app_state.clone()),
+            Path(game_id.clone()),
+            user2_headers,
+            Query(ClientIdQuery { client_id: None }),
+        ).await;
+
+        assert!(user2_extract_result.is_err());
+        let extract_error = user2_extract_result.unwrap_err();
+        assert_eq!(extract_error.status, StatusCode::FORBIDDEN);
+        assert!(extract_error.message.contains("Only the board owner can extract numbers"));
+
+        // Original owner still can extract
+        let user1_extract_result = handle_extract(
+            State(app_state.clone()),
+            Path(game_id),
+            user1_headers,
+            Query(ClientIdQuery { client_id: None }),
+        ).await;
+
+        assert!(user1_extract_result.is_ok());
+        let extract_response = user1_extract_result.unwrap();
+        assert_eq!(extract_response.0["success"], true);
     }
 }

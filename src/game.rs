@@ -431,6 +431,7 @@ impl Clone for GameRegistry {
 pub struct Game {
     id: Arc<Mutex<String>>,
     created_at: Arc<Mutex<SystemTime>>,
+    owner: Arc<Mutex<Option<String>>>,  // ClientID of the game creator
     board: Arc<Mutex<Board>>,
     pouch: Arc<Mutex<Pouch>>,
     scorecard: Arc<Mutex<ScoreCard>>,
@@ -449,6 +450,7 @@ impl Game {
         Self {
             id: Arc::new(Mutex::new(game_id)),
             created_at: Arc::new(Mutex::new(SystemTime::now())),
+            owner: Arc::new(Mutex::new(None)),  // Initially no owner, set when game is created
             board: Arc::new(Mutex::new(Board::new())),
             pouch: Arc::new(Mutex::new(Pouch::new())),
             scorecard: Arc::new(Mutex::new(ScoreCard::new())),
@@ -478,6 +480,27 @@ impl Game {
                 datetime.format("%Y-%m-%d %H:%M:%S UTC").to_string()
             }
             Err(_) => "Unknown time".to_string(),
+        }
+    }
+
+    /// Get the game owner (ClientID of the creator)
+    #[must_use] pub fn owner(&self) -> Option<String> {
+        self.owner.lock().unwrap().clone()
+    }
+
+    /// Set the game owner (ClientID of the creator)
+    pub fn set_owner(&self, client_id: &str) -> Result<(), String> {
+        match self.owner.lock() {
+            Ok(mut owner) => {
+                *owner = Some(client_id.to_string());
+                log(LogLevel::Info, MODULE_NAME, &format!("Set game owner to: {client_id}"));
+                Ok(())
+            }
+            Err(e) => {
+                let error_msg = format!("Failed to acquire owner lock: {e}");
+                log(LogLevel::Error, MODULE_NAME, &error_msg);
+                Err(error_msg)
+            }
         }
     }
 
@@ -726,10 +749,15 @@ impl Game {
 
     /// Get game information as a formatted string for debugging/logging
     #[must_use] pub fn game_info(&self) -> String {
+        let owner_info = match self.owner() {
+            Some(owner) => format!("owner={owner}"),
+            None => "owner=none".to_string(),
+        };
         format!(
-            "Game[id={}, created={}, board_len={}, pouch_len={}, score={}, started={}]",
+            "Game[id={}, created={}, {}, board_len={}, pouch_len={}, score={}, started={}]",
             self.id(),
             self.created_at_string(),
+            owner_info,
             self.board_length(),
             self.pouch_length(),
             self.published_score(),
@@ -817,6 +845,7 @@ impl Game {
         Ok(SerializableGameState {
             id: self.id(),
             created_at: self.created_at(),
+            owner: self.owner(),  // Include the game owner
             board,
             pouch,
             scorecard,
@@ -832,6 +861,7 @@ impl Game {
 pub struct SerializableGameState {
     pub id: String,
     pub created_at: SystemTime,
+    pub owner: Option<String>,  // ClientID of the game creator
     pub board: Board,
     pub pouch: Pouch,
     pub scorecard: ScoreCard,
@@ -918,6 +948,36 @@ mod tests {
         assert!(info.contains("score=0"));
         assert!(info.contains("started=false"));
         assert!(info.contains(&game.id()));
+    }
+
+    #[test]
+    fn test_game_owner() {
+        let game = Game::new();
+
+        // Initially, game should have no owner
+        assert!(game.owner().is_none());
+
+        // Game info should show owner=none
+        let info = game.game_info();
+        assert!(info.contains("owner=none"));
+
+        // Set an owner
+        let test_client_id = "test_client_123";
+        let result = game.set_owner(test_client_id);
+        assert!(result.is_ok());
+
+        // Verify owner is set correctly
+        assert_eq!(game.owner(), Some(test_client_id.to_string()));
+
+        // Game info should now show the owner
+        let info_with_owner = game.game_info();
+        assert!(info_with_owner.contains(&format!("owner={test_client_id}")));
+
+        // Verify owner is included in serializable state
+        let serializable_state = game.create_serializable_state();
+        assert!(serializable_state.is_ok());
+        let state = serializable_state.unwrap();
+        assert_eq!(state.owner, Some(test_client_id.to_string()));
     }
 
     #[test]

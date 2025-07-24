@@ -29,6 +29,7 @@ The Tombola server now supports multiple concurrent games through a **GameRegist
 - **Unique Game IDs**: 8-digit hexadecimal identifiers (format: `game_12345678`)
 - **Game Status Tracking**: Games transition through New → Active → Closed states
 - **Creation Timestamps**: Human-readable creation times for each game instance
+- **Game Ownership**: Each game tracks the ClientID of the board client that created it
 - **Game Isolation**: Complete separation of client registrations, cards, and game state per game
 - **Thread-Safe Registry**: Concurrent access to multiple games with proper mutex coordination
 
