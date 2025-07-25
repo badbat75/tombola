@@ -342,7 +342,75 @@ async fn main() {
 
             if assigned_cards.is_empty() {
                 println!("No cards assigned to this client.");
-                return;
+
+                // Check if we're in exit mode - if so, just exit
+                if args.exit {
+                    return;
+                }
+
+                // Offer the option to generate cards
+                println!("Would you like to generate cards? (y/N):");
+
+                use std::io::{self, Write};
+                print!("> ");
+                io::stdout().flush().unwrap();
+
+                let mut input = String::new();
+                match io::stdin().read_line(&mut input) {
+                    Ok(_) => {
+                        let response = input.trim().to_lowercase();
+                        if response == "y" || response == "yes" {
+                            // Ask for number of cards
+                            println!("How many cards would you like to generate? (1-6):");
+                            print!("> ");
+                            io::stdout().flush().unwrap();
+
+                            let mut card_count_input = String::new();
+                            match io::stdin().read_line(&mut card_count_input) {
+                                Ok(_) => {
+                                    match card_count_input.trim().parse::<u32>() {
+                                        Ok(count) if count > 0 && count <= 6 => {
+                                            println!("🎴 Generating {} cards...", count);
+                                            match client.generate_cards(count).await {
+                                                Ok(response) => {
+                                                    println!("✅ Successfully generated {} cards!", response.cards.len());
+                                                    println!("🔄 Restarting client to load new cards...");
+
+                                                    // Restart the client process to reload with new cards
+                                                    std::process::exit(0);
+                                                }
+                                                Err(e) => {
+                                                    println!("❌ Failed to generate cards: {}", e);
+                                                    println!("The game may have already started or you may not have permission.");
+                                                    return;
+                                                }
+                                            }
+                                        }
+                                        Ok(_) => {
+                                            println!("❌ Please enter a number between 1 and 6.");
+                                            return;
+                                        }
+                                        Err(_) => {
+                                            println!("❌ Invalid input. Please enter a number.");
+                                            return;
+                                        }
+                                    }
+                                }
+                                Err(_) => {
+                                    println!("❌ Failed to read input.");
+                                    return;
+                                }
+                            }
+                        } else {
+                            println!("👋 Exiting without generating cards.");
+                            return;
+                        }
+                    }
+                    Err(_) => {
+                        println!("❌ Failed to read input.");
+                        return;
+                    }
+                }
             }
 
             println!("\n🔥 Starting live monitoring (updating every 2 seconds)...");

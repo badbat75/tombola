@@ -151,33 +151,48 @@ pub async fn run_client_once() -> Result<(), Box<dyn Error>> {
 }
 
 pub async fn run_client_with_game_id(server_base_url: &str, game_id: &str, client_name: &str) -> Result<(), Box<dyn Error>> {
-    run_client_with_exit_flag_and_game_id(server_base_url, game_id, false, client_name).await
+    run_client_with_exit_flag_and_game_id(server_base_url, game_id, false, client_name, None).await
 }
 
 pub async fn run_client_once_with_game_id(server_base_url: &str, game_id: &str, client_name: &str) -> Result<(), Box<dyn Error>> {
-    run_client_with_exit_flag_and_game_id(server_base_url, game_id, true, client_name).await
+    run_client_with_exit_flag_and_game_id(server_base_url, game_id, true, client_name, None).await
 }
 
-pub async fn run_client_with_exit_flag_and_game_id(server_base_url: &str, game_id: &str, exit_after_display: bool, client_name: &str) -> Result<(), Box<dyn Error>> {
-    // Register the board client first
-    let http_client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()?;
+pub async fn run_client_with_game_id_and_client_id(server_base_url: &str, game_id: &str, client_name: &str, board_client_id: Option<String>) -> Result<(), Box<dyn Error>> {
+    run_client_with_exit_flag_and_game_id(server_base_url, game_id, false, client_name, board_client_id).await
+}
 
-    println!("🔗 Registering board client '{client_name}' with game '{game_id}'...");
+pub async fn run_client_once_with_game_id_and_client_id(server_base_url: &str, game_id: &str, client_name: &str, board_client_id: Option<String>) -> Result<(), Box<dyn Error>> {
+    run_client_with_exit_flag_and_game_id(server_base_url, game_id, true, client_name, board_client_id).await
+}
 
-    let register_response = registration::join_client(
-        server_base_url,
-        game_id,
-        client_name,
-        "board",
-        Some(1), // Generate 1 BOARD_ID card
-        Some("board@game.system".to_string()),
-        &http_client
-    ).await?;
+pub async fn run_client_with_exit_flag_and_game_id(server_base_url: &str, game_id: &str, exit_after_display: bool, client_name: &str, existing_board_client_id: Option<String>) -> Result<(), Box<dyn Error>> {
+    // Use existing board client ID if provided, otherwise register a new client
+    let board_client_id = if let Some(client_id) = existing_board_client_id {
+        println!("🔗 Using existing board client ID: {client_id}");
+        client_id
+    } else {
+        // Register the board client first
+        let http_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()?;
 
-    let board_client_id = register_response.client_id;
-    println!("✅ Board client registered successfully with ID: {board_client_id}");
+        println!("🔗 Registering board client '{client_name}' with game '{game_id}'...");
+
+        let register_response = registration::join_client(
+            server_base_url,
+            game_id,
+            client_name,
+            "board",
+            Some(1), // Generate 1 BOARD_ID card
+            Some("board@game.system".to_string()),
+            &http_client
+        ).await?;
+
+        let board_client_id = register_response.client_id;
+        println!("✅ Board client registered successfully with ID: {board_client_id}");
+        board_client_id
+    };
 
     // Main game loop
     loop {
@@ -335,14 +350,61 @@ async fn show_on_terminal_with_client_names(
     println!();
 }
 
-async fn call_newgame(server_base_url: &str) -> Result<String, Box<dyn Error>> {
+// Check if the current client is the board owner of the specified game
+async fn check_if_board_owner(server_base_url: &str, game_id: &str) -> Result<Option<String>, Box<dyn Error>> {
+    // Load client configuration to get the correct client name
+    let config = ClientConfig::load_or_default();
+    let client_name = config.client_name.clone();
+
+    // First, try to register globally to get our client ID
     let client = reqwest::Client::new();
+
+    // Register globally to get our client ID (this will return existing ID if already registered)
+    let register_response = registration::register_global_client(
+        server_base_url,
+        &client_name, // Use the same client name from config
+        "board",
+        Some(0),
+        None,
+        &client
+    ).await?;
+
+    let our_client_id = register_response.client_id;
+
+    // Get the game status to check who the owner is
+    let status_url = format!("{server_base_url}/{game_id}/status");
+    let response = client.get(&status_url).send().await?;
+
+    if response.status().is_success() {
+        let status: serde_json::Value = response.json().await?;
+
+        if let Some(owner_id) = status["owner"].as_str() {
+            if owner_id == our_client_id {
+                println!("🔗 Detected that you are the board owner of game {game_id}");
+                println!("✅ Using existing board client ID: {our_client_id}");
+                return Ok(Some(our_client_id));
+            } else {
+                println!("ℹ️  Game {game_id} has a different board owner");
+            }
+        }
+    }
+
+    // We're not the owner, so return None
+    Ok(None)
+}
+
+async fn call_newgame(server_base_url: &str) -> Result<(String, String), Box<dyn Error>> {
+    let client = reqwest::Client::new();
+
+    // Load client configuration to get the correct client name
+    let config = ClientConfig::load_or_default();
+    let client_name = config.client_name.clone();
 
     // First, register as a board client globally to get a proper client ID
     println!("🔄 Registering as board client globally...");
     let register_response = registration::register_global_client(
         server_base_url,
-        "BoardClient",
+        &client_name, // Use client name from config
         "board",
         Some(0), // Board clients don't need cards at global level
         None,
@@ -388,7 +450,7 @@ async fn call_newgame(server_base_url: &str) -> Result<String, Box<dyn Error>> {
         }
 
         println!(); // Add blank line for readability
-        Ok(game_id)
+        Ok((game_id, board_client_id))
     } else {
         let status = response.status();
         let error_text = response.text().await?;
@@ -438,18 +500,20 @@ async fn run_client_with_args(args: Args) -> Result<(), Box<dyn Error>> {
         return game_utils::list_games(&server_base_url).await;
     }
 
-    // Determine game_id
-    let game_id = if args.newgame {
+    // Determine game_id and board_client_id
+    let (game_id, board_client_id) = if args.newgame {
         // Create new game first
         match call_newgame(&server_base_url).await {
-            Ok(new_game_id) => new_game_id,
+            Ok((new_game_id, client_id)) => (new_game_id, Some(client_id)),
             Err(e) => {
                 eprintln!("Failed to reset game: {e}");
                 return Err(e);
             }
         }
     } else if let Some(provided_game_id) = args.gameid {
-        provided_game_id
+        // Check if we're already the board owner of this game
+        let board_client_id = check_if_board_owner(&server_base_url, &provided_game_id).await?;
+        (provided_game_id, board_client_id)
     } else {
         // No game_id provided and not creating new game - show games list first
         match game_utils::list_games(&server_base_url).await {
@@ -465,7 +529,7 @@ async fn run_client_with_args(args: Args) -> Result<(), Box<dyn Error>> {
                     // Extract just the game_id from the formatted string
                     if let Some(id) = game_info.split(',').next() {
                         println!("No games list available, using detected game: {}", id.trim());
-                        id.trim().to_string()
+                        (id.trim().to_string(), None)
                     } else {
                         return Err("Failed to extract game ID from response".into());
                     }
@@ -486,8 +550,8 @@ async fn run_client_with_args(args: Args) -> Result<(), Box<dyn Error>> {
 
     // Run the main client functionality with game_id and client_name
     if args.exit {
-        run_client_once_with_game_id(&server_base_url, &game_id, &client_name).await
+        run_client_once_with_game_id_and_client_id(&server_base_url, &game_id, &client_name, board_client_id).await
     } else {
-        run_client_with_game_id(&server_base_url, &game_id, &client_name).await
+        run_client_with_game_id_and_client_id(&server_base_url, &game_id, &client_name, board_client_id).await
     }
 }

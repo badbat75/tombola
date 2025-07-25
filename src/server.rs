@@ -11,7 +11,7 @@ use crate::config::ServerConfig;
 use crate::logging::{log, LogLevel};
 use crate::game::GameRegistry;
 use crate::client::ClientRegistry;
-use crate::api_handlers::{handle_global_clientinfo, handle_global_clientinfo_by_id, handle_global_register, handle_global_gameslist, handle_global_newgame, handle_join, handle_generatecards, handle_listassignedcards, handle_getassignedcard, handle_board, handle_pouch, handle_scoremap, handle_status, handle_extract, handle_dumpgame};
+use crate::api_handlers::{handle_global_clientinfo, handle_global_clientinfo_by_id, handle_global_register, handle_global_gameslist, handle_global_newgame, handle_join, handle_generatecards, handle_listassignedcards, handle_getassignedcard, handle_board, handle_pouch, handle_scoremap, handle_status, handle_extract, handle_dumpgame, handle_players};
 
 const MODULE_NAME: &str = "server";
 
@@ -48,6 +48,7 @@ pub struct AppState {
             .route("/{game_id}/pouch", get(handle_pouch))
             .route("/{game_id}/scoremap", get(handle_scoremap))
             .route("/{game_id}/status", get(handle_status))
+            .route("/{game_id}/players", get(handle_players))
             .route("/{game_id}/extract", post(handle_extract))
             .route("/{game_id}/dumpgame", post(handle_dumpgame))
             .layer(CorsLayer::permissive())

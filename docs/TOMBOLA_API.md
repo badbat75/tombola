@@ -42,6 +42,7 @@ http://127.0.0.1:3000
 | `GET` | `/{game_id}/board` | Get extracted numbers for game | None |
 | `GET` | `/{game_id}/pouch` | Get remaining numbers for game | None |
 | `GET` | `/{game_id}/status` | Get overall status for game | None |
+| `GET` | `/{game_id}/players` | Get list of players and their card counts | Client ID |
 | `GET` | `/{game_id}/scoremap` | Get scores and achievements for game | None |
 | `POST` | `/{game_id}/extract` | Extract next number in game | Board Client |
 | `POST` | `/{game_id}/dumpgame` | Dump specific game state to JSON | Board Client |
@@ -565,6 +566,82 @@ Get overall server status and specific game information.
 - `cards`: Total number of cards assigned in this game (as string)
 - `numbers_extracted`: Total count of numbers extracted so far in this game
 - `scorecard`: Current published score (highest achievement level reached) in this game
+
+#### GET /{game_id}/players
+
+Get a detailed list of all players (clients) registered to a specific game, including their client types and card counts.
+
+**Path Parameters:**
+- `game_id`: ID of the game (e.g., `game_12345678`)
+
+**Authentication Required:** `X-Client-ID` header with a registered client ID for the specified game
+
+**Success Response (200 OK):**
+```json
+{
+  "game_id": "game_12345678",
+  "total_players": 4,
+  "total_cards": 24,
+  "players": [
+    {
+      "client_id": "BOARD_CLIENT_ID",
+      "client_type": "board",
+      "card_count": 1
+    },
+    {
+      "client_id": "A1B2C3D4E5F6G7H8",
+      "client_type": "player",
+      "card_count": 6
+    },
+    {
+      "client_id": "B2C3D4E5F6G7H8I9",
+      "client_type": "player",
+      "card_count": 12
+    },
+    {
+      "client_id": "C3D4E5F6G7H8I9J0",
+      "client_type": "player",
+      "card_count": 5
+    }
+  ]
+}
+```
+
+**Error Responses:**
+
+**400 Bad Request - Missing Authentication:**
+```json
+{
+  "error": "Client ID header (X-Client-ID) is required"
+}
+```
+
+**403 Forbidden - Not Registered:**
+```json
+{
+  "error": "Client 'CLIENT_ID' is not registered in game 'GAME_ID'"
+}
+```
+
+**404 Not Found - Game Not Found:**
+```json
+{
+  "error": "Game 'game_12345678' not found"
+}
+```
+
+**Notes:**
+- `game_id`: Unique 8-digit hexadecimal identifier for the specific game
+- `total_players`: Total number of clients registered to this game
+- `total_cards`: Sum of all cards assigned to all players in this game
+- `players`: Array of player objects, sorted by client type (board clients first) then by client ID
+  - `client_id`: Unique identifier for the client
+  - `client_type`: Type of client ("board", "player", etc.)
+  - `card_count`: Number of cards assigned to this specific client in this game
+- Board clients show 0 cards (BOARD_ID cards are excluded from player card counts)
+- Player clients can have multiple cards based on their requests
+- Authentication required: Only registered clients (board or player) can access this endpoint
+- Useful for game monitoring, statistics, and administrative purposes
 
 #### POST /{game_id}/extract
 

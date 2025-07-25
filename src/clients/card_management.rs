@@ -13,7 +13,7 @@ pub async fn generate_cards(
     http_client: &reqwest::Client
 ) -> Result<GenerateCardsResponse, Box<dyn Error>> {
     let request = GenerateCardsRequest { count };
-    let url = format!("{server_url}/{game_id}/generatecardsforme");
+    let url = format!("{server_url}/{game_id}/generatecards");
 
     let response = http_client
         .post(&url)

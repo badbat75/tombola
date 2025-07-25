@@ -1,6 +1,7 @@
 use crate::defs::{Number, FIRSTNUMBER, LASTNUMBER, CARDSNUMBER, BOARDCONFIG};
 use crate::client::ClientRegistry;
 use crate::board::{BOARD_ID, board_client_id};
+use crate::game::GameStatus;
 
 use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
@@ -523,6 +524,13 @@ impl CardAssignmentManager {
         (card_infos, client_card_ids)
     }
 
+    /// Enhanced card assignment that respects game state and client's current card status
+    /// This allows clients who initially joined with 0 cards to generate cards later if the game hasn't started
+    pub fn assign_cards_with_game_state_check(&mut self, client_id: &str, count: u32, client_type: Option<&str>, game_status: &GameStatus) -> Result<(Vec<CardInfo>, Vec<String>), String> {
+        // Use the enhanced method that checks game state and current card count
+        self.generate_cards_for_registered_client(client_id, count, client_type, game_status)
+    }
+
     #[must_use] pub fn get_client_cards(&self, client_id: &str) -> Option<&Vec<String>> {
         self.client_cards.get(client_id)
     }
@@ -533,6 +541,40 @@ impl CardAssignmentManager {
 
     #[must_use] pub fn get_all_assignments(&self) -> &HashMap<String, CardAssignment> {
         &self.assignments
+    }
+
+    /// Check if a client can generate additional cards
+    /// Returns true if the client has no cards currently (0 cards) or is not yet in the client_cards map
+    #[must_use] pub fn can_client_generate_cards(&self, client_id: &str) -> bool {
+        match self.client_cards.get(client_id) {
+            Some(cards) => cards.is_empty(), // Client is registered but has 0 cards
+            None => true, // Client is not in the map yet, so they can generate cards
+        }
+    }
+
+    /// Generate cards for a client who may already be registered but has 0 cards
+    /// This allows card generation after registration if the client initially joined with nocard
+    /// and the game is still in "New" state (hasn't started yet)
+    pub fn generate_cards_for_registered_client(&mut self, client_id: &str, count: u32, client_type: Option<&str>, game_status: &GameStatus) -> Result<(Vec<CardInfo>, Vec<String>), String> {
+        // Check if game is still in "New" state - only allow card generation in new games
+        if *game_status != GameStatus::New {
+            return Err(format!("Cannot generate cards: game is in '{}' state. Card generation is only allowed in 'New' games.", game_status.as_str()));
+        }
+
+        // Check if client is registered (exists in client_cards map)
+        if !self.client_cards.contains_key(client_id) {
+            return Err("Client is not registered in this game".to_string());
+        }
+
+        // Check if client can generate cards (has 0 cards currently)
+        if !self.can_client_generate_cards(client_id) {
+            return Err("Client already has cards assigned".to_string());
+        }
+
+        // Generate new cards
+        let (card_infos, client_card_ids) = self.assign_cards_with_type(client_id, count, client_type);
+
+        Ok((card_infos, client_card_ids))
     }
 
     #[must_use] pub fn client_owns_card(&self, client_id: &str, card_id: &str) -> bool {
@@ -588,4 +630,124 @@ impl CardAssignmentManager {
         "Unknown".to_string()
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::GameStatus;
+
+    #[test]
+    fn test_generate_cards_for_registered_client_new_game() {
+        // Setup
+        let mut card_manager = CardAssignmentManager::new();
+        let client_id = "test_client_123";
+        let client_type = Some("player");
+        let game_status = GameStatus::New;
+
+        // Register client with 0 cards initially
+        card_manager.client_cards.insert(client_id.to_string(), vec![]);
+
+        // Test: Should generate cards when game is in New state
+        let result = card_manager.generate_cards_for_registered_client(
+            client_id, 1, client_type, &game_status
+        );
+
+        assert!(result.is_ok(), "Should allow card generation for registered client in new game");
+
+        // Verify card was assigned
+        let assigned_cards = card_manager.get_client_assigned_cards(client_id);
+        assert_eq!(assigned_cards.len(), 1, "Should have exactly one card assigned");
+        assert_eq!(assigned_cards[0].assigned_to, client_id);
+    }
+
+    #[test]
+    fn test_generate_cards_for_registered_client_active_game() {
+        // Setup
+        let mut card_manager = CardAssignmentManager::new();
+        let client_id = "test_client_123";
+        let client_type = Some("player");
+        let game_status = GameStatus::Active;
+
+        // Register client with 0 cards initially
+        card_manager.client_cards.insert(client_id.to_string(), vec![]);
+
+        // Test: Should NOT generate cards when game is Active
+        let result = card_manager.generate_cards_for_registered_client(
+            client_id, 1, client_type, &game_status
+        );
+
+        assert!(result.is_err(), "Should reject card generation for active game");
+
+        // Verify no card was assigned
+        let assigned_cards = card_manager.get_client_assigned_cards(client_id);
+        assert_eq!(assigned_cards.len(), 0, "Should have no cards assigned");
+    }
+
+    #[test]
+    fn test_generate_cards_for_registered_client_closed_game() {
+        // Setup
+        let mut card_manager = CardAssignmentManager::new();
+        let client_id = "test_client_123";
+        let client_type = Some("player");
+        let game_status = GameStatus::Closed;
+
+        // Register client with 0 cards initially
+        card_manager.client_cards.insert(client_id.to_string(), vec![]);
+
+        // Test: Should NOT generate cards when game is Closed
+        let result = card_manager.generate_cards_for_registered_client(
+            client_id, 1, client_type, &game_status
+        );
+
+        assert!(result.is_err(), "Should reject card generation for closed game");
+
+        // Verify no card was assigned
+        let assigned_cards = card_manager.get_client_assigned_cards(client_id);
+        assert_eq!(assigned_cards.len(), 0, "Should have no cards assigned");
+    }
+
+    #[test]
+    fn test_generate_cards_for_unregistered_client() {
+        // Setup
+        let mut card_manager = CardAssignmentManager::new();
+        let client_id = "unregistered_client";
+        let client_type = Some("player");
+        let game_status = GameStatus::New;
+
+        // Test: Should NOT generate cards for unregistered client
+        let result = card_manager.generate_cards_for_registered_client(
+            client_id, 1, client_type, &game_status
+        );
+
+        assert!(result.is_err(), "Should reject card generation for unregistered client");
+
+        // Verify no card was assigned
+        let assigned_cards = card_manager.get_client_assigned_cards(client_id);
+        assert_eq!(assigned_cards.len(), 0, "Should have no cards assigned");
+    }
+
+    #[test]
+    fn test_assign_cards_with_game_state_check_integration() {
+        // Setup
+        let mut card_manager = CardAssignmentManager::new();
+        let client_id = "pluto_client";
+        let client_type = Some("player");
+        let game_status = GameStatus::New;
+
+        // First register with 0 cards (simulating join without card generation)
+        card_manager.client_cards.insert(client_id.to_string(), vec![]);
+
+        // Test: assign_cards_with_game_state_check should work for registered client with 0 cards
+        let result = card_manager.assign_cards_with_game_state_check(
+            client_id, 1, client_type, &game_status
+        );
+
+        assert!(result.is_ok(), "Should allow card assignment for registered client with 0 cards in new game");
+
+        // Verify card was assigned
+        let assigned_cards = card_manager.get_client_assigned_cards(client_id);
+        assert_eq!(assigned_cards.len(), 1, "Should have exactly one card assigned");
+        assert_eq!(assigned_cards[0].assigned_to, client_id);
+    }
 }

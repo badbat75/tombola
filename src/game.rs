@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use rand::Rng;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use crate::board::Board;
+use crate::board::{Board, BOARD_ID};
 use crate::pouch::Pouch;
 use crate::score::ScoreCard;
 use crate::logging::{log, LogLevel};
@@ -718,10 +718,13 @@ impl Game {
         }
     }
 
-    /// Get the total number of cards assigned in this game
+    /// Get the total number of cards assigned in this game (excludes board cards)
     #[must_use] pub fn card_count(&self) -> usize {
         if let Ok(manager) = self.card_manager.lock() {
-            manager.get_all_assignments().len()
+            manager.get_all_assignments()
+                .iter()
+                .filter(|(card_id, _)| **card_id != BOARD_ID)
+                .count()
         } else {
             0
         }

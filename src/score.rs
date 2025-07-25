@@ -103,8 +103,13 @@ impl ScoreCard {
             }
         };
 
-        // Iterate through all card assignments
+        // Iterate through all card assignments, but exclude the board card
         for (card_id, assignment) in card_assignments {
+            // Skip the board card - it should only be processed by board_calculate_score
+            if card_id == &board_card_id() {
+                continue;
+            }
+
             let (card_score, contributing_numbers) = calculate_card_score(assignment);
 
             // Update the global score to the highest score achieved by any card
@@ -375,49 +380,45 @@ impl ScoreCard {
                     for achievement_level in 2..=std::cmp::min(bestscore, 5) {
                         // Use entry API to avoid double lookup
                         if let std::collections::hash_map::Entry::Vacant(e) = self.score_map.entry(achievement_level) {
-                            let level_achievements = if achievement_level == bestscore {
+                            let mut level_achievements = Vec::new();
+
+                            if achievement_level == bestscore {
                                 // For the current best score, use the actual current achievements
                                 if allcardscore_value >= boardscore_value {
                                     // Add card achievements that achieved this score level
-                                    let mut achievements: Vec<ScoreAchievement> = card_details.iter()
-                                        .filter(|(_, numbers)| numbers.len() as Number == achievement_level)
-                                        .map(|(card_id, numbers)| {
-                                            ScoreAchievement {
+                                    for (card_id, numbers) in &card_details {
+                                        if numbers.len() as Number == achievement_level {
+                                            level_achievements.push(ScoreAchievement {
                                                 client_id: card_manager.get_client_id_for_card(card_id),
                                                 card_id: card_id.to_string(),
                                                 numbers: numbers.clone(),
-                                            }
-                                        }).collect();
+                                            });
+                                        }
+                                    }
 
                                     // If board score also meets this level, include it
                                     if boardscore_value == achievement_level {
                                         if let Some(client_id) = board_client_id {
-                                            achievements.push(ScoreAchievement {
+                                            level_achievements.push(ScoreAchievement {
                                                 client_id: client_id.to_string(),
                                                 card_id: board_card_id(),
                                                 numbers: board_numbers_contributing.clone(),
                                             });
                                         }
                                     }
-                                    achievements
                                 } else if boardscore_value == achievement_level {
                                     // Only board achievement - only create if we have a client ID
                                     if let Some(client_id) = board_client_id {
-                                        vec![ScoreAchievement {
+                                        level_achievements.push(ScoreAchievement {
                                             client_id: client_id.to_string(),
                                             card_id: board_card_id(),
                                             numbers: board_numbers_contributing.clone(),
-                                        }]
-                                    } else {
-                                        Vec::new()
+                                        });
                                     }
-                                } else {
-                                    Vec::new()
                                 }
                             } else {
                                 // For lower achievement levels, we need to reconstruct what achievements existed
                                 // This is for cases where we jump from level 2 to level 4, we need to fill in level 3
-                                let mut level_achievements = Vec::new();
 
                                 // Check if any card achieved exactly this level
                                 for (card_id, numbers) in &card_details {
@@ -450,9 +451,7 @@ impl ScoreCard {
                                         });
                                     }
                                 }
-
-                                level_achievements
-                            };
+                            }
 
                             if !level_achievements.is_empty() {
                                 e.insert(level_achievements);

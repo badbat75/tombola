@@ -3137,4 +3137,337 @@ mod tests {
         let extract_response = user1_extract_result.unwrap();
         assert_eq!(extract_response.0["success"], true);
     }
+
+    #[tokio::test]
+    async fn test_end_to_end_players_endpoint() {
+        let app_state = create_test_app_state();
+
+        // Step 1: Create a game with board client
+        let (game_id, board_client_id) = create_test_game_with_board_client(&app_state).await;
+
+        // Step 2: Test players endpoint with only board client
+        let mut board_headers = HeaderMap::new();
+        board_headers.insert("X-Client-ID", board_client_id.parse().unwrap());
+
+        let initial_players_result = handle_players(
+            Path(game_id.clone()),
+            State(app_state.clone()),
+            board_headers.clone(),
+        ).await;
+
+        assert!(initial_players_result.is_ok());
+        let initial_response = initial_players_result.unwrap();
+        assert_eq!(initial_response.0["game_id"], game_id);
+        assert_eq!(initial_response.0["total_players"], 1);
+        assert_eq!(initial_response.0["total_cards"], 0); // Board cards are not counted as player cards
+
+        let initial_players = initial_response.0["players"].as_array().unwrap();
+        assert_eq!(initial_players.len(), 1);
+        assert_eq!(initial_players[0]["client_id"], board_client_id);
+        assert_eq!(initial_players[0]["client_type"], "board");
+        assert_eq!(initial_players[0]["card_count"], 0); // Board client shows 0 cards (BOARD_ID filtered out)
+
+        // Step 3: Register multiple players with different card counts
+        let player1_request = RegisterRequest {
+            name: "player1".to_string(),
+            client_type: "player".to_string(),
+            nocard: Some(6),
+            email: None,
+        };
+
+        let player2_request = RegisterRequest {
+            name: "player2".to_string(),
+            client_type: "player".to_string(),
+            nocard: Some(12),
+            email: None,
+        };
+
+        let player3_request = RegisterRequest {
+            name: "player3".to_string(),
+            client_type: "player".to_string(),
+            nocard: Some(3),
+            email: None,
+        };
+
+        // Register players globally first
+        let player1_global = handle_global_register(
+            State(app_state.clone()),
+            HeaderMap::new(),
+            JsonExtractor(player1_request.clone()),
+        ).await;
+        assert!(player1_global.is_ok());
+        let player1_id = player1_global.unwrap().0.client_id;
+
+        let player2_global = handle_global_register(
+            State(app_state.clone()),
+            HeaderMap::new(),
+            JsonExtractor(player2_request.clone()),
+        ).await;
+        assert!(player2_global.is_ok());
+        let player2_id = player2_global.unwrap().0.client_id;
+
+        let player3_global = handle_global_register(
+            State(app_state.clone()),
+            HeaderMap::new(),
+            JsonExtractor(player3_request.clone()),
+        ).await;
+        assert!(player3_global.is_ok());
+        let player3_id = player3_global.unwrap().0.client_id;
+
+        // Join players to the game
+        let player1_join = handle_join(
+            Path(game_id.clone()),
+            State(app_state.clone()),
+            JsonExtractor(player1_request),
+        ).await;
+        assert!(player1_join.is_ok());
+
+        let player2_join = handle_join(
+            Path(game_id.clone()),
+            State(app_state.clone()),
+            JsonExtractor(player2_request),
+        ).await;
+        assert!(player2_join.is_ok());
+
+        let player3_join = handle_join(
+            Path(game_id.clone()),
+            State(app_state.clone()),
+            JsonExtractor(player3_request),
+        ).await;
+        assert!(player3_join.is_ok());
+
+        // Step 4: Test players endpoint with all players
+        let full_players_result = handle_players(
+            Path(game_id.clone()),
+            State(app_state.clone()),
+            board_headers.clone(),
+        ).await;
+
+        assert!(full_players_result.is_ok());
+        let full_response = full_players_result.unwrap();
+        assert_eq!(full_response.0["game_id"], game_id);
+        assert_eq!(full_response.0["total_players"], 4); // 1 board + 3 players
+        assert_eq!(full_response.0["total_cards"], 21); // 0 + 6 + 12 + 3 = 21 (board cards not counted)
+
+        let all_players = full_response.0["players"].as_array().unwrap();
+        assert_eq!(all_players.len(), 4);
+
+        // Step 5: Verify sorting (board client should be first)
+        assert_eq!(all_players[0]["client_type"], "board");
+        assert_eq!(all_players[0]["client_id"], board_client_id);
+        assert_eq!(all_players[0]["card_count"], 0); // Board client shows 0 cards (BOARD_ID filtered out)
+
+        // Step 6: Verify player data and card counts
+        let mut found_player1 = false;
+        let mut found_player2 = false;
+        let mut found_player3 = false;
+
+        for player in all_players.iter() {
+            let client_id = player["client_id"].as_str().unwrap();
+            let client_type = player["client_type"].as_str().unwrap();
+            let card_count = player["card_count"].as_u64().unwrap();
+
+            if client_id == player1_id {
+                assert_eq!(client_type, "player");
+                assert_eq!(card_count, 6);
+                found_player1 = true;
+            } else if client_id == player2_id {
+                assert_eq!(client_type, "player");
+                assert_eq!(card_count, 12);
+                found_player2 = true;
+            } else if client_id == player3_id {
+                assert_eq!(client_type, "player");
+                assert_eq!(card_count, 3);
+                found_player3 = true;
+            }
+        }
+
+        assert!(found_player1, "Player1 should be in the response");
+        assert!(found_player2, "Player2 should be in the response");
+        assert!(found_player3, "Player3 should be in the response");
+
+        // Step 7: Test error handling for non-existent game
+        let nonexistent_game_result = handle_players(
+            Path("game_nonexistent".to_string()),
+            State(app_state.clone()),
+            board_headers.clone(),
+        ).await;
+
+        assert!(nonexistent_game_result.is_err());
+        let error = nonexistent_game_result.unwrap_err();
+        assert_eq!(error.status, StatusCode::NOT_FOUND);
+        assert!(error.message.contains("Game 'game_nonexistent' not found"));
+
+        // Step 8: Test with empty game (create a new game with no additional players)
+        let (empty_game_id, empty_board_id) = create_test_game_with_board_client(&app_state).await;
+
+        let mut empty_board_headers = HeaderMap::new();
+        empty_board_headers.insert("X-Client-ID", empty_board_id.parse().unwrap());
+
+        let empty_players_result = handle_players(
+            Path(empty_game_id.clone()),
+            State(app_state.clone()),
+            empty_board_headers,
+        ).await;
+
+        assert!(empty_players_result.is_ok());
+        let empty_response = empty_players_result.unwrap();
+        assert_eq!(empty_response.0["game_id"], empty_game_id);
+        assert_eq!(empty_response.0["total_players"], 1);
+        assert_eq!(empty_response.0["total_cards"], 0); // Board cards are not counted as player cards
+
+        let empty_players = empty_response.0["players"].as_array().unwrap();
+        assert_eq!(empty_players.len(), 1);
+        assert_eq!(empty_players[0]["client_id"], empty_board_id);
+        assert_eq!(empty_players[0]["client_type"], "board");
+        assert_eq!(empty_players[0]["card_count"], 0); // Board client shows 0 cards (BOARD_ID filtered out)
+
+        // Step 9: Test authentication requirements
+        // Test with missing client ID header
+        let missing_client_id_result = handle_players(
+            Path(game_id.clone()),
+            State(app_state.clone()),
+            HeaderMap::new(),
+        ).await;
+
+        assert!(missing_client_id_result.is_err());
+        let auth_error = missing_client_id_result.unwrap_err();
+        assert_eq!(auth_error.status, StatusCode::BAD_REQUEST);
+        assert!(auth_error.message.contains("Client ID header (X-Client-ID) is required"));
+
+        // Test with unregistered client ID
+        let mut unregistered_headers = HeaderMap::new();
+        unregistered_headers.insert("X-Client-ID", "UNREGISTERED_CLIENT_ID".parse().unwrap());
+
+        let unregistered_client_result = handle_players(
+            Path(game_id.clone()),
+            State(app_state.clone()),
+            unregistered_headers,
+        ).await;
+
+        assert!(unregistered_client_result.is_err());
+        let unregistered_error = unregistered_client_result.unwrap_err();
+        assert_eq!(unregistered_error.status, StatusCode::FORBIDDEN);
+        assert!(unregistered_error.message.contains("Client 'UNREGISTERED_CLIENT_ID' is not registered in game"));
+    }
+}
+
+pub async fn handle_players(
+    Path(game_id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    log(LogLevel::Info, MODULE_NAME, &format!("Request received: GET /{game_id}/players"));
+
+    // Extract and validate client ID from headers
+    let client_id = match headers.get("X-Client-ID") {
+        Some(client_id_header) => {
+            match client_id_header.to_str() {
+                Ok(client_id_str) => client_id_str.to_string(),
+                Err(_) => {
+                    let error_msg = "Invalid Client ID header format";
+                    log(LogLevel::Warning, MODULE_NAME, error_msg);
+                    return Err(ApiError::new(StatusCode::BAD_REQUEST, error_msg.to_string()));
+                }
+            }
+        }
+        None => {
+            let error_msg = "Client ID header (X-Client-ID) is required";
+            log(LogLevel::Warning, MODULE_NAME, error_msg);
+            return Err(ApiError::new(StatusCode::BAD_REQUEST, error_msg.to_string()));
+        }
+    };
+
+    // Get the game
+    let game = match state.game_registry.get_game(&game_id) {
+        Ok(Some(game)) => game,
+        Ok(None) => {
+            let error_msg = format!("Game '{game_id}' not found");
+            log(LogLevel::Warning, MODULE_NAME, &error_msg);
+            return Err(ApiError::new(StatusCode::NOT_FOUND, error_msg));
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to access game '{game_id}': {e}");
+            log(LogLevel::Error, MODULE_NAME, &error_msg);
+            return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error_msg));
+        }
+    };
+
+    // Verify the client is registered in this game
+    if !game.contains_client(&client_id) {
+        let error_msg = format!("Client '{client_id}' is not registered in game '{game_id}'");
+        log(LogLevel::Warning, MODULE_NAME, &error_msg);
+        return Err(ApiError::new(StatusCode::FORBIDDEN, error_msg));
+    }
+
+    // Get all client types for this game
+    let client_types = match game.get_all_client_types() {
+        Ok(types) => types,
+        Err(e) => {
+            let error_msg = format!("Failed to get client types for game '{game_id}': {e}");
+            log(LogLevel::Error, MODULE_NAME, &error_msg);
+            return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error_msg));
+        }
+    };
+
+    // Get card assignment manager to count cards per client
+    let card_manager = game.card_manager();
+    let card_manager_lock = match card_manager.lock() {
+        Ok(manager) => manager,
+        Err(_) => {
+            let error_msg = format!("Failed to lock card assignment manager for game '{game_id}'");
+            log(LogLevel::Error, MODULE_NAME, &error_msg);
+            return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error_msg));
+        }
+    };
+    // Build player information with card counts
+    let mut players_data = Vec::new();
+
+    for client_type_info in client_types {
+        // Count cards for this client (excluding board cards)
+        let card_count = if let Some(client_cards) = card_manager_lock.get_client_cards(&client_type_info.client_id) {
+            client_cards.iter().filter(|card_id| **card_id != BOARD_ID).count()
+        } else {
+            0
+        };
+
+        let player_info = json!({
+            "client_id": client_type_info.client_id,
+            "client_type": client_type_info.client_type,
+            "card_count": card_count
+        });
+
+        players_data.push(player_info);
+    }
+
+    // Sort by client type (board clients first) then by client_id
+    players_data.sort_by(|a, b| {
+        let type_a = a["client_type"].as_str().unwrap_or("");
+        let type_b = b["client_type"].as_str().unwrap_or("");
+        let id_a = a["client_id"].as_str().unwrap_or("");
+        let id_b = b["client_id"].as_str().unwrap_or("");
+
+        match (type_a, type_b) {
+            ("board", "player") => std::cmp::Ordering::Less,
+            ("player", "board") => std::cmp::Ordering::Greater,
+            _ => id_a.cmp(id_b),
+        }
+    });
+
+    let total_players = players_data.len();
+    let total_cards: usize = players_data
+        .iter()
+        .map(|p| p["card_count"].as_u64().unwrap_or(0) as usize)
+        .sum();
+
+    log(LogLevel::Info, MODULE_NAME, &format!("Players list for game '{game_id}': {total_players} players, {total_cards} total cards"));
+
+    let response = json!({
+        "game_id": game_id,
+        "total_players": total_players,
+        "total_cards": total_cards,
+        "players": players_data
+    });
+
+    Ok(Json(response))
 }
