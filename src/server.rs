@@ -15,13 +15,6 @@ use crate::api_handlers::{handle_global_clientinfo, handle_global_clientinfo_by_
 
 const MODULE_NAME: &str = "server";
 
-// Response structures for JSON serialization
-#[derive(serde::Serialize)]
-#[allow(dead_code)]
-struct ErrorResponse {
-    error: String,
-}
-
 pub struct AppState {
     pub game_registry: GameRegistry,
     pub global_client_registry: ClientRegistry,

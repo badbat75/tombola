@@ -41,16 +41,16 @@ impl ClientInfo {
     #[must_use] pub fn new(name: &str, client_type: &str, email: &str) -> Self {
         // Generate a client ID based on name, type, and current time
         let mut hasher = DefaultHasher::new();
-        
+
         // Include name, type, and current time for uniqueness
         hasher.write(name.as_bytes());
         hasher.write(client_type.as_bytes());
-        
+
         // Use high-resolution timestamp for better uniqueness
         if let Ok(duration) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
             hasher.write(&duration.as_nanos().to_le_bytes());
         }
-        
+
         let hash = hasher.finish();
         let client_id = format!("{hash:016X}");
 
@@ -93,7 +93,7 @@ impl ClientRegistry {
     pub fn insert(&self, client: ClientInfo) -> Result<Option<ClientInfo>, String> {
         let mut clients_lock = self.clients.lock()
             .map_err(|_| "Failed to lock client registry")?;
-        
+
         Ok(clients_lock.insert(client.id.clone(), client))
     }
 
@@ -101,14 +101,14 @@ impl ClientRegistry {
     pub fn get_by_name(&self, client_name: &str) -> Result<Option<ClientInfo>, String> {
         let clients_lock = self.clients.lock()
             .map_err(|_| "Failed to lock client registry")?;
-        
+
         // Find client by name
         for client in clients_lock.values() {
             if client.name == client_name {
                 return Ok(Some(client.clone()));
             }
         }
-        
+
         Ok(None)
     }
 
@@ -116,20 +116,15 @@ impl ClientRegistry {
     pub fn get(&self, client_id: &str) -> Result<Option<ClientInfo>, String> {
         let clients_lock = self.clients.lock()
             .map_err(|_| "Failed to lock client registry")?;
-        
-        Ok(clients_lock.get(client_id).cloned())
-    }
 
-    /// Get a client by client ID (alias for consistency)
-    pub fn get_by_client_id(&self, client_id: &str) -> Result<Option<ClientInfo>, String> {
-        self.get(client_id)
+        Ok(clients_lock.get(client_id).cloned())
     }
 
     /// Get all clients as a vector (since we can't return iterator with lock)
     pub fn get_all_clients(&self) -> Result<Vec<ClientInfo>, String> {
         let clients_lock = self.clients.lock()
             .map_err(|_| "Failed to lock client registry")?;
-        
+
         Ok(clients_lock.values().cloned().collect())
     }
 
@@ -137,7 +132,7 @@ impl ClientRegistry {
     pub fn is_empty(&self) -> Result<bool, String> {
         let clients_lock = self.clients.lock()
             .map_err(|_| "Failed to lock client registry")?;
-        
+
         Ok(clients_lock.is_empty())
     }
 
@@ -145,7 +140,7 @@ impl ClientRegistry {
     pub fn len(&self) -> Result<usize, String> {
         let clients_lock = self.clients.lock()
             .map_err(|_| "Failed to lock client registry")?;
-        
+
         Ok(clients_lock.len())
     }
 
@@ -153,7 +148,7 @@ impl ClientRegistry {
     pub fn contains_client(&self, client_id: &str) -> Result<bool, String> {
         let clients_lock = self.clients.lock()
             .map_err(|_| "Failed to lock client registry")?;
-        
+
         Ok(clients_lock.contains_key(client_id))
     }
 
@@ -178,7 +173,7 @@ impl ClientRegistry {
     pub fn remove(&self, client_id: &str) -> Result<Option<ClientInfo>, String> {
         let mut clients_lock = self.clients.lock()
             .map_err(|_| "Failed to lock client registry")?;
-        
+
         Ok(clients_lock.remove(client_id))
     }
 
@@ -236,8 +231,8 @@ mod tests {
 
         // Should return previous value when inserting same client ID
         let new_client = ClientInfo::new("newplayer", "player", "new@example.com");
-        let updated_client = ClientInfo { 
-            id: client.id.clone(), 
+        let updated_client = ClientInfo {
+            id: client.id.clone(),
             name: new_client.name,
             client_type: new_client.client_type,
             registered_at: new_client.registered_at,

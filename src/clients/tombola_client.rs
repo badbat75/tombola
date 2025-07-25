@@ -163,9 +163,9 @@ pub async fn run_client_with_exit_flag_and_game_id(server_base_url: &str, game_i
     let http_client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()?;
-    
+
     println!("🔗 Registering board client '{client_name}' with game '{game_id}'...");
-    
+
     let register_response = registration::join_client(
         server_base_url,
         game_id,
@@ -175,7 +175,7 @@ pub async fn run_client_with_exit_flag_and_game_id(server_base_url: &str, game_i
         Some("board@game.system".to_string()),
         &http_client
     ).await?;
-    
+
     let board_client_id = register_response.client_id;
     println!("✅ Board client registered successfully with ID: {board_client_id}");
 
@@ -337,13 +337,27 @@ async fn show_on_terminal_with_client_names(
 
 async fn call_newgame(server_base_url: &str) -> Result<String, Box<dyn Error>> {
     let client = reqwest::Client::new();
-    let url = format!("{server_base_url}/newgame");
 
+    // First, register as a board client globally to get a proper client ID
+    println!("🔄 Registering as board client globally...");
+    let register_response = registration::register_global_client(
+        server_base_url,
+        "BoardClient",
+        "board",
+        Some(0), // Board clients don't need cards at global level
+        None,
+        &client
+    ).await?;
+
+    let board_client_id = register_response.client_id;
+    println!("✅ Registered as board client with ID: {board_client_id}");
+
+    let url = format!("{server_base_url}/newgame");
     println!("🔄 Creating new game...");
 
     let response = client
         .post(&url)
-        .header("X-Client-ID", BOARD_ID) // Board client ID
+        .header("X-Client-ID", &board_client_id) // Use dynamic board client ID
         .send()
         .await?;
 

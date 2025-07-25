@@ -38,19 +38,8 @@ impl ScoreCard {
         &self.score_map
     }
 
-    #[must_use] pub fn with_score(score: Number) -> Self {
-        ScoreCard {
-            published_score: score,
-            score_map: HashMap::new()
-        }
-    }
-
     pub fn update_scorecard(&mut self, score: Number) {
         self.published_score = score;
-    }
-
-    pub fn update_score_map(&mut self, score_idx: Number, achievements: Vec<ScoreAchievement>) {
-        self.score_map.insert(score_idx, achievements);
     }
 
     #[must_use] pub fn allcards_calculate_score(&self, board_numbers: &[Number], card_assignments: &std::collections::HashMap<String, crate::card::CardAssignment>) -> (Number, Vec<(String, Vec<Number>)>) {
@@ -329,7 +318,7 @@ impl ScoreCard {
                 if bestscore == NUMBERSPERCARD {
                     // BINGO is achieved - only store legitimate BINGO achievements
                     let mut bingo_achievements = Vec::new();
-                    
+
                     // Check for card BINGO achievements
                     if allcardscore_value == NUMBERSPERCARD {
                         // Only include cards that actually have all 15 numbers extracted
@@ -342,12 +331,12 @@ impl ScoreCard {
                                         card_numbers.push(number);
                                     }
                                 }
-                                
+
                                 let extracted_from_card: Vec<Number> = card_numbers.iter()
                                     .filter(|&&num| board_numbers.contains(&num))
                                     .copied()
                                     .collect();
-                                
+
                                 // Only include if this card has exactly 15 extracted numbers (BINGO)
                                 if extracted_from_card.len() == NUMBERSPERCARD as usize {
                                     bingo_achievements.push(ScoreAchievement {
@@ -359,7 +348,7 @@ impl ScoreCard {
                             }
                         }
                     }
-                    
+
                     // Check for board BINGO achievement
                     if boardscore_value == NUMBERSPERCARD {
                         if let Some(client_id) = board_client_id {
@@ -375,7 +364,7 @@ impl ScoreCard {
                     if !bingo_achievements.is_empty() {
                         self.score_map.insert(NUMBERSPERCARD, bingo_achievements);
                     }
-                    
+
                     // When BINGO is reached, we don't process regular line achievements
                     // BINGO is the final achievement
                 } else {

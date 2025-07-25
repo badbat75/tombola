@@ -376,7 +376,7 @@ pub async fn handle_generatecards(
     }
 
     // Get client type for proper card assignment
-    let client_type = match app_state.global_client_registry.get_by_client_id(&client_id) {
+    let client_type = match app_state.global_client_registry.get(&client_id) {
         Ok(Some(info)) => Some(info.client_type.clone()),
         _ => None,
     };
@@ -787,7 +787,7 @@ pub async fn handle_global_newgame(
     log(LogLevel::Info, MODULE_NAME, &format!("[Client: {client_id}] New game request"));
 
     // Verify client exists in global registry (any authenticated client can create a game)
-    match app_state.global_client_registry.get_by_client_id(&client_id) {
+    match app_state.global_client_registry.get(&client_id) {
         Ok(Some(_client_info)) => {
             // Client exists, they can create a game
         }
@@ -1044,31 +1044,37 @@ mod tests {
 
     // Helper function to create a test game via API and return its ID
     async fn create_test_game(app_state: &Arc<AppState>) -> String {
-        // First, ensure the BOARD_ID client is registered globally
-        let board_client_info = crate::client::ClientInfo {
-            id: BOARD_ID.to_string(),
-            name: "Board".to_string(),
+        let (game_id, _) = create_test_game_with_board_client(app_state).await;
+        game_id
+    }
+
+    // Helper function to create a test game with board client and return both game ID and board client ID
+    async fn create_test_game_with_board_client(app_state: &Arc<AppState>) -> (String, String) {
+        // First, register a board client globally
+        let board_register_request = RegisterRequest {
+            name: "TestBoard".to_string(),
             client_type: "board".to_string(),
-            registered_at: std::time::SystemTime::now(),
-            email: String::new(),
+            nocard: Some(0),
+            email: None,
         };
 
-        // Add to global registry (this will not overwrite if already exists)
-        let _ = app_state.global_client_registry.insert(board_client_info);
+        let global_register_result = handle_global_register(
+            State(app_state.clone()),
+            HeaderMap::new(),
+            JsonExtractor(board_register_request),
+        ).await.unwrap();
+
+        let board_client_id = global_register_result.0.client_id.clone();
 
         // Use the board client to create a new game via API
         let mut board_headers = HeaderMap::new();
-        board_headers.insert("X-Client-ID", BOARD_ID.parse().unwrap());
+        board_headers.insert("X-Client-ID", board_client_id.parse().unwrap());
 
         let newgame_result = handle_global_newgame(State(app_state.clone()), board_headers).await;
         match newgame_result {
             Ok(response) => {
                 let game_id = response["game_id"].as_str().unwrap().to_string();
-
-                // The board client is automatically registered and assigned BOARD_ID card in newgame
-                // No need to call register_board_client_to_game anymore
-
-                game_id
+                (game_id, board_client_id)
             }
             Err(_) => panic!("Failed to create test game via API"),
         }
@@ -1080,42 +1086,6 @@ mod tests {
     }
 
     // Helper function to register the board client to a game for testing using API handlers
-    async fn register_board_client_to_game(app_state: &Arc<AppState>, game_id: &str) {
-        // First, manually add the board client to the global registry with the fixed BOARD_ID
-        // This ensures the board client has the expected ID constant
-        let board_client_info = crate::client::ClientInfo {
-            id: BOARD_ID.to_string(),
-            name: "Board".to_string(),
-            client_type: "board".to_string(),
-            registered_at: std::time::SystemTime::now(),
-            email: String::new(),
-        };
-
-        // Add to global registry (this will not overwrite if already exists)
-        let _ = app_state.global_client_registry.insert(board_client_info);
-
-        // Now register the board client to the specific game using the API
-        let board_register_request = RegisterRequest {
-            name: "Board".to_string(),
-            client_type: "board".to_string(),
-            nocard: Some(0), // Board doesn't need cards
-            email: None,
-        };
-
-        let join_result = handle_join(
-            Path(game_id.to_string()),
-            State(app_state.clone()),
-            JsonExtractor(board_register_request)
-        ).await;
-
-        // This should succeed since we're registering a board client
-        assert!(join_result.is_ok(), "Failed to register board client to game {game_id}");
-        let join_response = join_result.unwrap();
-
-        // Verify the board client got the expected BOARD_ID
-        assert_eq!(join_response.client_id, BOARD_ID, "Board client should have BOARD_ID");
-    }
-
     // Helper function to create a registered client
     async fn register_test_client(app_state: &Arc<AppState>, name: &str) -> String {
         let request = RegisterRequest {
@@ -1199,13 +1169,10 @@ mod tests {
         let app_state = create_test_app_state();
 
         // Start the game by extracting a number through the API
-        let game_id = create_test_game(&app_state).await;
-
-        // Register BOARD_ID as a board client for this game using API
-        register_board_client_to_game(&app_state, &game_id).await;
+        let (game_id, board_client_id) = create_test_game_with_board_client(&app_state).await;
 
         let mut board_headers = HeaderMap::new();
-        board_headers.insert("X-Client-ID", BOARD_ID.parse().unwrap());
+        board_headers.insert("X-Client-ID", board_client_id.parse().unwrap());
 
         let _ = handle_extract(
             State(app_state.clone()),
@@ -1292,15 +1259,34 @@ mod tests {
     async fn test_handle_client_info_by_id_board_client() {
         let app_state = create_test_app_state();
 
+        // First register a global board client
+        let register_request = RegisterRequest {
+            name: "Board".to_string(),
+            client_type: "board".to_string(),
+            nocard: Some(0),
+            email: None,
+        };
+
+        let register_result = handle_global_register(
+            State(app_state.clone()),
+            HeaderMap::new(),
+            JsonExtractor(register_request)
+        ).await;
+
+        assert!(register_result.is_ok());
+        let register_response = register_result.unwrap();
+        let board_client_id = register_response.client_id.clone();
+
+        // Now test looking up the registered board client
         let result = handle_global_clientinfo_by_id(
             State(app_state.clone()),
-            Path(BOARD_ID.to_string()),
+            Path(board_client_id.clone()),
         ).await;
 
         assert!(result.is_ok());
         let response = result.unwrap();
         assert_eq!(response.name, "Board");
-        assert_eq!(response.client_id, BOARD_ID);
+        assert_eq!(response.client_id, board_client_id);
         assert_eq!(response.client_type, "board");
     }
 
@@ -1515,14 +1501,13 @@ mod tests {
     #[tokio::test]
     async fn test_handle_board_with_extracted_numbers() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state).await;
 
-        // Register BOARD_ID as a board client for this game using API
-        register_board_client_to_game(&app_state, &game_id).await;
+        // Create a new game and get the board client ID that was created
+        let (game_id, board_client_id) = create_test_game_with_board_client(&app_state).await;
 
-        // Extract some numbers using the proper API handler
+        // Extract some numbers using the proper API handler with the actual board client ID
         let mut headers = HeaderMap::new();
-        headers.insert("X-Client-ID", BOARD_ID.parse().unwrap()); // Board client
+        headers.insert("X-Client-ID", board_client_id.parse().unwrap());
 
         let _ = handle_extract(
             State(app_state.clone()),
@@ -1574,14 +1559,11 @@ mod tests {
     #[tokio::test]
     async fn test_handle_pouch_after_extraction() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state).await;
-
-        // Register BOARD_ID as a board client for this game using API
-        register_board_client_to_game(&app_state, &game_id).await;
+        let (game_id, board_client_id) = create_test_game_with_board_client(&app_state).await;
 
         // Extract a number through the API
         let mut board_headers = HeaderMap::new();
-        board_headers.insert("X-Client-ID", BOARD_ID.parse().unwrap());
+        board_headers.insert("X-Client-ID", board_client_id.parse().unwrap());
 
         let _ = handle_extract(
             State(app_state.clone()),
@@ -1623,7 +1605,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_status() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state).await;
+        let (game_id, board_client_id) = create_test_game_with_board_client(&app_state).await;
 
         let result = handle_status(
             State(app_state.clone()),
@@ -1637,7 +1619,7 @@ mod tests {
         assert_eq!(response.0["status"], "new");  // New game should have "new" status
         assert!(response.0["game_id"].is_string());
         assert!(response.0["created_at"].is_string());
-        assert_eq!(response.0["owner"], BOARD_ID);  // Test game is created by BOARD_ID client
+        assert_eq!(response.0["owner"], board_client_id);  // Test game is created by board client
         assert_eq!(response.0["numbers_extracted"], 0);
         assert_eq!(response.0["scorecard"], 0);
         // Note: server field was removed from new implementation, so don't check it
@@ -1688,13 +1670,10 @@ mod tests {
     #[tokio::test]
     async fn test_handle_extract_success() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state).await;
-
-        // Register BOARD_ID as a board client for this game using API
-        register_board_client_to_game(&app_state, &game_id).await;
+        let (game_id, board_client_id) = create_test_game_with_board_client(&app_state).await;
 
         let mut headers = HeaderMap::new();
-        headers.insert("X-Client-ID", BOARD_ID.parse().unwrap()); // Board client
+        headers.insert("X-Client-ID", board_client_id.parse().unwrap()); // Board client
 
         let result = handle_extract(
             State(app_state.clone()),
@@ -1755,10 +1734,10 @@ mod tests {
     #[tokio::test]
     async fn test_handle_newgame_success() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state).await;
+        let (game_id, board_client_id) = create_test_game_with_board_client(&app_state).await;
 
         let mut headers = HeaderMap::new();
-        headers.insert("X-Client-ID", BOARD_ID.parse().unwrap()); // Board client
+        headers.insert("X-Client-ID", board_client_id.parse().unwrap()); // Board client
 
         // Register a client and extract some numbers to have game state through API
         let _ = register_test_client(&app_state, "newgame_test_player").await;
@@ -1782,7 +1761,7 @@ mod tests {
         assert!(response["game_id"].is_string());
         assert!(response["created_at"].is_string());
         assert!(response["note"].is_string());
-        assert_eq!(response["board_owner"], BOARD_ID);
+        assert_eq!(response["board_owner"], board_client_id);
 
         // Verify a new game was added to the registry
         let final_count = app_state.game_registry.total_games().unwrap();
@@ -1807,13 +1786,10 @@ mod tests {
     #[tokio::test]
     async fn test_handle_dumpgame_success() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state).await;
-
-        // Register BOARD_ID as a board client for this game using API
-        register_board_client_to_game(&app_state, &game_id).await;
+        let (game_id, board_client_id) = create_test_game_with_board_client(&app_state).await;
 
         let mut headers = HeaderMap::new();
-        headers.insert("X-Client-ID", BOARD_ID.parse().unwrap()); // Board client
+        headers.insert("X-Client-ID", board_client_id.parse().unwrap()); // Board client
 
         // Create some game state through API
         let _ = register_test_client(&app_state, "dumpgame_test_player").await;
@@ -1879,10 +1855,7 @@ mod tests {
     #[tokio::test]
     async fn test_client_flow_integration() {
         let app_state = create_test_app_state();
-        let game_id = get_test_game_id(&app_state).await;
-
-        // Register BOARD_ID as a board client for this game using API
-        register_board_client_to_game(&app_state, &game_id).await;
+        let (game_id, board_client_id) = create_test_game_with_board_client(&app_state).await;
 
         // Register a client
         let client_id = register_test_client_to_game(&app_state, "integration_test_player", &game_id).await;
@@ -1912,7 +1885,7 @@ mod tests {
 
         // Extract a number (as board client)
         let mut board_headers = HeaderMap::new();
-        board_headers.insert("X-Client-ID", BOARD_ID.parse().unwrap());
+        board_headers.insert("X-Client-ID", board_client_id.parse().unwrap());
 
         let extract_result = handle_extract(
             State(app_state.clone()),
@@ -1989,11 +1962,10 @@ mod tests {
         let _new_game_id = create_test_game(&app_state).await;
 
         // Create an active game via API and make it active by extracting numbers
-        let active_game_id = create_test_game(&app_state).await;
-        register_board_client_to_game(&app_state, &active_game_id).await;
+        let (active_game_id, board_client_id) = create_test_game_with_board_client(&app_state).await;
 
         let mut board_headers = HeaderMap::new();
-        board_headers.insert("X-Client-ID", BOARD_ID.parse().unwrap());
+        board_headers.insert("X-Client-ID", board_client_id.parse().unwrap());
 
         // Extract a number to make it active
         let _ = handle_extract(
@@ -2049,13 +2021,12 @@ mod tests {
         let app_state = create_test_app_state();
 
         // Register BOARD_ID as a board client for the original game using API
-        let original_game_id = get_test_game_id(&app_state).await;
-        register_board_client_to_game(&app_state, &original_game_id).await;
+        let (_original_game_id, original_board_client_id) = create_test_game_with_board_client(&app_state).await;
 
         // Step 1: Create 3 new games via the newgame endpoint
         let mut game_ids = Vec::new();
         let mut board_headers = HeaderMap::new();
-        board_headers.insert("X-Client-ID", BOARD_ID.parse().unwrap());
+        board_headers.insert("X-Client-ID", original_board_client_id.parse().unwrap());
 
         for i in 1..=3 {
             println!("📝 Creating game {i}");
@@ -2064,9 +2035,6 @@ mod tests {
 
             let newgame_response = newgame_result.unwrap();
             let game_id = newgame_response["game_id"].as_str().unwrap().to_string();
-
-            // Register BOARD_ID as a board client for this new game using API
-            register_board_client_to_game(&app_state, &game_id).await;
 
             game_ids.push(game_id.clone());
             println!("✅ Created game {i} with ID: {game_id}");

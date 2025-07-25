@@ -21,12 +21,6 @@ pub const BOARD_ID: &str = "0000000000000000";
     BOARD_ID.to_string()
 }
 
-/// Returns the board ID as a String (generic helper for any string conversion)
-#[inline]
-#[must_use] pub fn board_id_string() -> String {
-    BOARD_ID.to_string()
-}
-
 // This struct represents the board in the Tombola game.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Board {
